@@ -309,22 +309,8 @@ def main() -> None:
             st.error("The system cannot check for duplicates or add new items until the Cloud DB is available.")
             st.error("Please check your internet connection and Cloud DB configuration.")
 
-        st.info(cloud_db_status)
-
         # Only trigger prefetch if Cloud DB is available
         if "❌" not in cloud_db_status:
-            # Manual prefetch button for cloud environment
-            col_prefetch, _ = st.columns([2, 3])
-            with col_prefetch:
-                if st.button("🔄 Populate User Selection", use_container_width=True):
-                    try:
-                        # Run prefetcher directly (works in cloud)
-                        _populate_user_selection_direct(10)
-                        st.success("✅ Successfully populated User Selection!")
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"❌ Error running prefetch: {e}")
-
             # Automatic prefetch with better triggering
             current_time = time.time()
             last_check_key = "last_prefetch_check"
