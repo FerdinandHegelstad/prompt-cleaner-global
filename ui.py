@@ -1,4 +1,23 @@
 #!ui.py
+import os
+
+# Bootstrap secrets to environment variables at app start
+# This must happen before importing modules that read config at import time
+try:
+    import streamlit as st
+    xai = st.secrets.get("xai", {})
+    # Accept both nested [xai] and flat keys
+    key   = xai.get("XAI_API_KEY") or st.secrets.get("XAI_API_KEY")
+    url   = xai.get("BASE_URL")    or st.secrets.get("XAI_BASE_URL", "https://api.x.ai/v1")
+    model = xai.get("MODEL")       or st.secrets.get("XAI_MODEL", "grok-3-mini")
+
+    if key:   os.environ.setdefault("XAI_API_KEY", key)
+    if url:   os.environ.setdefault("XAI_BASE_URL", str(url))
+    if model: os.environ.setdefault("XAI_MODEL", str(model))
+except Exception:
+    # If not running under Streamlit, st.secrets won't exist - that's fine.
+    pass
+
 import asyncio
 import time
 from typing import Any, Dict, List, Optional

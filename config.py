@@ -79,28 +79,67 @@ def getUserSelectionObjectName() -> str:
     return objectName or "USER_SELECTION.json"
 
 
+def _get_st_secrets():
+    """Helper to get Streamlit secrets safely."""
+    try:
+        import streamlit as st
+        return st.secrets
+    except Exception:
+        return {}
+
+def _get_nested(*path, default=None):
+    """Helper to safely get nested secrets values."""
+    s = _get_st_secrets()
+    try:
+        for p in path:
+            s = s[p]
+        return s
+    except Exception:
+        return default
+
+def _first(*vals):
+    """Return the first non-empty value from the list."""
+    for v in vals:
+        if v and str(v).strip():
+            return str(v).strip()
+    return None
+
 def getXaiApiKey() -> Optional[str]:
     """Returns the xAI API key for Grok API.
 
     Reads from environment variable XAI_API_KEY or Streamlit secrets.
+    Supports both nested [xai] and flat keys.
     Returns None if not found (app will work in fallback mode).
     """
-    apiKey: Optional[str] = os.getenv("XAI_API_KEY")
+    return _first(
+        _get_nested("xai", "XAI_API_KEY"),
+        _get_nested("xai", "api_key"),  # Legacy format
+        _get_nested("XAI_API_KEY"),
+        os.getenv("XAI_API_KEY")
+    )
 
-    # Try to get from Streamlit secrets
-    if not apiKey:
-        try:
-            # Import streamlit with proper error handling
-            try:
-                import streamlit as st  # type: ignore
-            except ImportError:
-                st = None
+def getXaiBaseUrl() -> str:
+    """Returns the xAI base URL.
 
-            if st and hasattr(st, 'secrets') and 'xai' in st.secrets:
-                apiKey = st.secrets['xai']['api_key']
-        except Exception:
-            pass
+    Defaults to 'https://api.x.ai/v1' if not found.
+    """
+    return _first(
+        _get_nested("xai", "BASE_URL"),
+        _get_nested("XAI_BASE_URL"),
+        os.getenv("XAI_BASE_URL"),
+        "https://api.x.ai/v1"
+    )
 
-    return apiKey
+def getXaiModel() -> str:
+    """Returns the xAI model name.
+
+    Defaults to 'grok-3-mini' if not found.
+    """
+    return _first(
+        _get_nested("xai", "MODEL"),
+        _get_nested("XAI_MODEL"),
+        os.getenv("XAI_MODEL"),
+        "grok-3-mini"
+    )
 
 

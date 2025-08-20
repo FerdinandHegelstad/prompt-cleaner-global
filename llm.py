@@ -1,21 +1,27 @@
 #!llm.py
 import asyncio
-import os
-from dotenv import load_dotenv # type: ignore
-from openai import AsyncOpenAI # type: ignore
 from typing import Optional
-from config import getXaiApiKey
-
-load_dotenv()
-
-API_KEY = getXaiApiKey()
-BASE_URL = 'https://api.x.ai/v1'
-MODEL = 'grok-3-mini'
+from openai import AsyncOpenAI
+from config import getXaiApiKey, getXaiBaseUrl, getXaiModel
 
 with open('clean.prompt', 'r', encoding='utf-8') as f:
     SYSTEM_PROMPT = f.read()
 
-async def call_llm(default: str, max_retries: int = 3) -> str:
+def _make_client(api_key: Optional[str] = None, base_url: Optional[str] = None) -> AsyncOpenAI:
+    """Create an AsyncOpenAI client with proper configuration."""
+    key = api_key or getXaiApiKey()
+    if not key:
+        raise RuntimeError("Missing XAI_API_KEY (set in Streamlit secrets or env).")
+    return AsyncOpenAI(api_key=key, base_url=base_url or getXaiBaseUrl())
+
+async def call_llm(
+    default: str,
+    *,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
+    max_retries: int = 3,
+) -> str:
     """Calls the xAI Grok API asynchronously to clean the string.
 
     This function will ALWAYS call the LLM and wait for a response.
@@ -23,6 +29,9 @@ async def call_llm(default: str, max_retries: int = 3) -> str:
 
     Args:
         default: The default string as user input.
+        api_key: Optional API key (will use config if not provided)
+        base_url: Optional base URL (will use config if not provided)
+        model: Optional model name (will use config if not provided)
         max_retries: Maximum number of retries on failure (default: 3)
 
     Returns:
@@ -32,25 +41,23 @@ async def call_llm(default: str, max_retries: int = 3) -> str:
         RuntimeError: If API key is not available
         Exception: If LLM call fails after all retries
     """
-    if not API_KEY:
-        raise RuntimeError("LLM API key is not available. Cannot proceed without LLM processing.")
-
-    client = AsyncOpenAI(api_key=API_KEY, base_url=BASE_URL)
+    client = _make_client(api_key, base_url)
+    mdl = model or getXaiModel()
     last_exception = None
 
     for attempt in range(max_retries + 1):
         try:
             response = await client.chat.completions.create(
-                model=MODEL,
+                model=mdl,
                 messages=[
-                    {'role': 'system', 'content': SYSTEM_PROMPT},
-                    {
-                        'role': 'user',
-                        'content': f"One line in → one line out. Clean this exactly as instructed. Return only the cleaned line, no quotes, no punctuation changes beyond rules, no extra whitespace. Input: {default}"
-                    }
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user",
+                     "content": ("One line in → one line out. Clean this exactly as instructed. "
+                                 "Return only the cleaned line, no quotes, no punctuation changes beyond rules, "
+                                 f"no extra whitespace. Input: {default}")},
                 ],
                 temperature=0.0,
-                max_tokens=1000
+                max_tokens=1000,
             )
             return response.choices[0].message.content
 
@@ -79,3 +86,18 @@ async def call_llm(default: str, max_retries: int = 3) -> str:
 
     # This should never be reached, but just in case
     raise last_exception or RuntimeError("LLM call failed for unknown reason")
+
+def call_llm_sync(*args, **kwargs) -> str:
+    """Synchronous wrapper for call_llm that handles event loop issues."""
+    try:
+        return asyncio.run(call_llm(*args, **kwargs))
+    except RuntimeError as e:
+        if "asyncio.run() cannot be called" in str(e):
+            loop = asyncio.new_event_loop()
+            import asyncio as _a
+            try:
+                _a.set_event_loop(loop)
+                return loop.run_until_complete(call_llm(*args, **kwargs))
+            finally:
+                loop.close()
+        raise
