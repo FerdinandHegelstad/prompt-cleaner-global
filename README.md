@@ -4,7 +4,6 @@ A Streamlit application for cleaning and managing prompts with Google Cloud Stor
 
 ## Features
 
-- **Multi-user support**: Up to 5 users can work simultaneously
 - **Google Cloud Storage**: Centralized data storage for prompts and user selections
 - **Real-time collaboration**: Shared database with optimistic concurrency
 - **Streamlit UI**: Clean, intuitive interface for prompt management

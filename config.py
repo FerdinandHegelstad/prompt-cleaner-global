@@ -14,8 +14,13 @@ def getBucketName() -> str:
     # Try to get from Streamlit secrets
     if not bucketName:
         try:
-            import streamlit as st
-            if hasattr(st, 'secrets'):
+            # Import streamlit with proper error handling
+            try:
+                import streamlit as st  # type: ignore
+            except ImportError:
+                st = None
+
+            if st and hasattr(st, 'secrets'):
                 # Try environment section (professional format)
                 if 'environment' in st.secrets and 'GCS_BUCKET' in st.secrets['environment']:
                     bucketName = st.secrets['environment']['GCS_BUCKET']
@@ -85,8 +90,13 @@ def getXaiApiKey() -> Optional[str]:
     # Try to get from Streamlit secrets
     if not apiKey:
         try:
-            import streamlit as st
-            if hasattr(st, 'secrets') and 'xai' in st.secrets:
+            # Import streamlit with proper error handling
+            try:
+                import streamlit as st  # type: ignore
+            except ImportError:
+                st = None
+
+            if st and hasattr(st, 'secrets') and 'xai' in st.secrets:
                 apiKey = st.secrets['xai']['api_key']
         except Exception:
             pass

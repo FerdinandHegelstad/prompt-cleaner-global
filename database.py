@@ -13,7 +13,7 @@ from cloud_storage import (
     uploadTextFile,
 )
 from config import getAptJsonPath, getBucketName, getDatabaseObjectName, getUserSelectionObjectName
-from normalizer import build_dedup_key
+from text_utils import build_dedup_key
 
 USER_SELECTION_FILE = 'USER_SELECTION.json'
 

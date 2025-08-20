@@ -19,9 +19,14 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
     """
     # Try to use Streamlit GCS connection first (for cloud deployment)
     try:
-        import streamlit as st
-        if hasattr(st, 'secrets'):
-            # Use professional Streamlit GCS connection format
+        # Import streamlit with proper error handling
+        try:
+            import streamlit as st  # type: ignore
+        except ImportError:
+            st = None
+
+        if st and hasattr(st, 'secrets'):
+            # Try professional Streamlit GCS connection format first
             if 'connections' in st.secrets and 'gcs' in st.secrets['connections']:
                 gcs_config = st.secrets['connections']['gcs']
                 credentials_dict = {
@@ -38,10 +43,26 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
                 }
                 return service_account.Credentials.from_service_account_info(credentials_dict)
 
-            # Since we're using the professional format, we can remove the old fallback
-            # The connections.gcs format is now the standard and preferred method
+            # Fallback: Try service account JSON stored as string in secrets
+            elif 'gcp_service_account' in st.secrets:
+                import json
+                try:
+                    credentials_dict = json.loads(st.secrets['gcp_service_account'])
+                    return service_account.Credentials.from_service_account_info(credentials_dict)
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"DEBUG: Failed to parse gcp_service_account from secrets: {e}")
+
+            # Fallback: Try other common secret keys
+            elif 'google_cloud' in st.secrets and 'credentials' in st.secrets['google_cloud']:
+                import json
+                try:
+                    credentials_dict = json.loads(st.secrets['google_cloud']['credentials'])
+                    return service_account.Credentials.from_service_account_info(credentials_dict)
+                except (json.JSONDecodeError, ValueError) as e:
+                    print(f"DEBUG: Failed to parse google_cloud.credentials from secrets: {e}")
+
             else:
-                print("DEBUG: No GCS connection format found")
+                print("DEBUG: No GCS connection format found in Streamlit secrets")
         else:
             print("DEBUG: Streamlit secrets not available")
     except Exception as e:

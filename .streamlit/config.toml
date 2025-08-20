@@ -1,19 +1,19 @@
-[global]
-developmentMode = false
-
-[logger]
-level = "info"
-
 [server]
-headless = true
-port = 8501
-enableCORS = false
+
+# Enable CORS for cross-origin requests (required for XSRF protection)
+enableCORS = true
+
+# Enable XSRF protection for security
 enableXsrfProtection = true
 
+# Allow all origins (you can restrict this to specific domains if needed)
+# corsAllowedOrigins = ["*"]
+
 [browser]
-serverAddress = "0.0.0.0"
+
+# Server settings for better compatibility
+serverAddress = "localhost"
 serverPort = 8501
 
-[theme]
-base = "light"
-primaryColor = "#ff4b4b"
+# Enable server CORS to avoid the warning
+server.enableCORS = true

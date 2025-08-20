@@ -1,222 +1,203 @@
 #!ui.py
 import asyncio
-import json
-import os
-import subprocess
-import sys
 import time
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import pandas as pd  # type: ignore
 import streamlit as st  # type: ignore
-import matplotlib.pyplot as plt  # type: ignore
-import numpy as np  # type: ignore
 
+# --- External modules (your project) ---
 try:
-    from cloud_storage import downloadJson, downloadTextFile, getStorageClient, loadCredentialsFromAptJson, uploadTextFile
-    from config import getAptJsonPath, getBucketName, getDatabaseObjectName, getRawStrippedObjectName
+    from cloud_storage import (
+        downloadJson,
+        downloadTextFile,
+        getStorageClient,
+        loadCredentialsFromAptJson,
+    )
+    from config import (
+        getAptJsonPath,
+        getBucketName,
+        getDatabaseObjectName,
+        getRawStrippedObjectName,
+    )
     from database import DatabaseManager
-    from probability_sampler import analyze_prompt_lengths, get_distribution_curve, load_length_statistics
-    from remove_lines import remove_lines_containing
+    from workflow import Workflow
 except ImportError as e:
     st.error(f"Import Error: {e}")
-    st.error("This might be due to missing dependencies or module loading issues.")
+    st.error("Missing dependencies or module import failure. Make sure project files are deployed.")
     st.stop()
+
+
+# -----------------------------
+# Async helper
+# -----------------------------
+
+def run_async(coro):
+    """Run an async coroutine safely from Streamlit.
+
+    Streamlit runs your script synchronously; this helper guards against the
+    occasional "event loop already running" case (e.g., in some hosts/tests).
+    """
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
 
 
 # -----------------------------
 # Global Database (GCS-backed)
 # -----------------------------
-def loadGlobalDatabase() -> List[Dict[str, Any]]:
-    bucketName = getBucketName()
-    objectName = getDatabaseObjectName()
-    aptJsonPath = getAptJsonPath()
-    credentials = loadCredentialsFromAptJson(aptJsonPath)
+
+def load_global_database() -> List[Dict[str, Any]]:
+    bucket_name = getBucketName()
+    object_name = getDatabaseObjectName()
+    apt_json_path = getAptJsonPath()
+    credentials = loadCredentialsFromAptJson(apt_json_path)
     client = getStorageClient(credentials)
-    data, _generation = downloadJson(client, bucketName, objectName)
+    data, _generation = downloadJson(client, bucket_name, object_name)
     if not isinstance(data, list):
         return []
     return data
 
 
-def toCleanedDataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
-    cleanedValues = [str(r.get("cleaned") or "").strip() for r in records]
-    cleanedValues = [v for v in cleanedValues if v]
-    return pd.DataFrame({"cleaned": cleanedValues})
-
-
-def toEditorDataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
+def to_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """Build a dataframe with a selectable column for editing/deletion.
 
     Columns: selected (bool), cleaned
     """
     rows: List[Dict[str, Any]] = []
     for r in records:
-        rows.append(
-            {
-                "selected": False,
-                "cleaned": str(r.get("cleaned") or "").strip(),
-            }
-        )
+        rows.append({
+            "selected": False,
+            "cleaned": str(r.get("cleaned") or "").strip(),
+        })
     df = pd.DataFrame(rows)
-    # Ensure expected order
     return df[["selected", "cleaned"]] if not df.empty else df
 
 
 # -----------------------------
-# Local User Selection helpers
+# User Selection helpers
 # -----------------------------
-USER_SELECTION_FILE = "USER_SELECTION.json"
-PREFETCH_LOCK_FILE = ".prefetcher.lock"
+
+def get_user_selection_count() -> int:
+    try:
+        db = DatabaseManager()
+        count = run_async(db.get_user_selection_count())
+        return int(count)
+    except Exception:
+        return 0
 
 
-def _getProjectPaths() -> Dict[str, Path]:
-    base = Path(__file__).resolve().parent
-    return {
-        "base": base,
-        "userSelection": base / USER_SELECTION_FILE,
-        "rawStripped": base / "raw_stripped.txt",
-        "workflow": base / "workflow.py",
-        "lock": base / PREFETCH_LOCK_FILE,
-    }
+def top_up_user_selection(target_capacity: int = 10, threshold: int = 7) -> int:
+    """Ensure the USER_SELECTION queue has at least `threshold` items, by running
+    the Workflow directly (no subprocess, no lock files).
 
-
-def popOneUserSelectionItem() -> Optional[Dict[str, Any]]:
-    """Remove and return one item from GCS-based user selection.
-
-    Returns None if empty or error. Uses DatabaseManager for GCS operations.
+    Returns the number of items added (best effort).
     """
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        db = DatabaseManager()
-        item = loop.run_until_complete(db.pop_user_selection_item())
-        return item
+        current = get_user_selection_count()
+        if current >= threshold:
+            return 0
+
+        deficit = target_capacity - current
+        overfetch = max(deficit, int((deficit * 3.0 + 0.9999)))  # multiplier 3x
+
+        # Check for raw_stripped.txt existence in GCS before running workflow
+        bucket_name = getBucketName()
+        object_name = getRawStrippedObjectName()
+        apt_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_path)
+        client = getStorageClient(credentials)
+        content, _ = downloadTextFile(client, bucket_name, object_name)
+        if not (content and content.strip()):
+            return 0
+
+        workflow = Workflow(object_name, overfetch)
+        run_async(workflow.run())
+
+        after = get_user_selection_count()
+        return max(0, after - current)
     except Exception:
-        return None
+        return 0
 
 
-def ensureSessionItemLoaded() -> None:
-    """Ensure there is a current item in session state for review.
-
-    Removes one item from local selection if needed and stores it for the user
-    to decide Keep/Remove without additional loads.
-    """
+def ensure_session_item_loaded() -> None:
+    """Loads one item from USER_SELECTION into session for review."""
     if "currentSelectionItem" in st.session_state and st.session_state.currentSelectionItem is not None:
         return
-
-    # Handle async call properly for Streamlit
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         db = DatabaseManager()
-        item = loop.run_until_complete(db.pop_user_selection_item())
+        item = run_async(db.pop_user_selection_item())
         st.session_state.currentSelectionItem = item
     except Exception as e:
         st.error(f"Error loading selection item: {e}")
         st.session_state.currentSelectionItem = None
 
 
-def _countUserSelection() -> int:
-    try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        db = DatabaseManager()
-        count = loop.run_until_complete(db.get_user_selection_count())
-        return count
-    except Exception:
-        return 0
-
-
-def _populate_user_selection_direct(targetCapacity: int = 10) -> None:
-    """Direct implementation of prefetcher logic without subprocess calls."""
-    import asyncio
-    import math
-    import time
-    from pathlib import Path
-    from database import DatabaseManager
-    from cloud_storage import downloadTextFile, getStorageClient, loadCredentialsFromAptJson
-    from config import getAptJsonPath, getBucketName, getRawStrippedObjectName
-    from workflow import Workflow
-
-    try:
-        # Get current count
-        db = DatabaseManager()
-        currentCount = asyncio.run(db.get_user_selection_count())
-
-        if currentCount >= targetCapacity:
-            return
-
-        deficit = targetCapacity - currentCount
-        x = max(deficit, int(math.ceil(deficit * 3.0)))  # multiplier of 3
-
-        # Check if raw_stripped.txt exists in GCS
-        bucket_name = getBucketName()
-        object_name = getRawStrippedObjectName()
-        apt_path = getAptJsonPath()
-        credentials = loadCredentialsFromAptJson(apt_path)
-        client = getStorageClient(credentials)
-
-        content, _ = downloadTextFile(client, bucket_name, object_name)
-        if not content.strip():
-            return
-
-        # Run workflow directly
-        workflow = Workflow(object_name, x)
-        asyncio.run(workflow.run())
-
-    except Exception:
-        pass
-
-
-def triggerTopUpIfLow(targetCapacity: int = 10, threshold: int = 7) -> None:
-    """If USER_SELECTION.json has fewer than `threshold` items, ensure a background
-    prefetcher process is running to top up to `targetCapacity`.
-
-    Prefetcher is responsible for lock creation/removal; we only check for lock existence
-    to avoid spawning duplicates.
-    """
-    paths = _getProjectPaths()
-    count = _countUserSelection()
-    if count >= threshold:
-        return
-
-    # Direct function call instead of subprocess (works in cloud)
-    try:
-        _populate_user_selection_direct(targetCapacity)
-    except Exception:
-        pass
-
-
 # -----------------------------
 # Streamlit UI
 # -----------------------------
+
 def main() -> None:
     st.set_page_config(page_title="Prompt Cleaner UI", layout="wide")
     st.title("Prompt Cleaner")
 
-    tabGlobal, tabUserSelection, tabDistribution, tabRawStripped = st.tabs(["Global Database", "User Selection", "Prompt Distribution", "Raw File Management"])  # top-level tabs
+    tab_global, tab_user_selection = st.tabs([
+        "Global Database",
+        "User Selection"
+    ])
 
     # --- Global Database Tab ---
-    with tabGlobal:
+    with tab_global:
         st.subheader("Global Database: Cleaned Entries")
         st.caption("Loads from Google Cloud Storage only when you click Load.")
+
+        # Status metrics
+        try:
+            st.metric("User Selection Queue", f"{get_user_selection_count():,}", help="Items waiting for review")
+        except Exception as e:
+            st.metric("User Selection Queue", "Error", help=f"Failed to load: {e}")
+
+        # Raw file info
+        try:
+            bucket_name = getBucketName()
+            object_name = getRawStrippedObjectName()
+            apt_json_path = getAptJsonPath()
+            credentials = loadCredentialsFromAptJson(apt_json_path)
+            client = getStorageClient(credentials)
+
+            content, generation = downloadTextFile(client, bucket_name, object_name)
+            if content:
+                lines = content.split('\n')
+                total_lines = len(lines)
+                non_empty_lines = len([ln for ln in lines if ln.strip()])
+                file_size = len(content)
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Raw File Lines", f"{total_lines:,}", help="Total lines in raw_stripped.txt")
+                with col2:
+                    st.metric("Non-empty Lines", f"{non_empty_lines:,}", help="Lines with content")
+                with col3:
+                    st.metric("File Size", f"{file_size:,} bytes", help="Size of raw_stripped.txt")
+            else:
+                st.metric("Raw File Status", "Empty or missing", help="raw_stripped.txt not found or empty")
+        except Exception as e:
+            st.metric("Raw File Status", "Error", help=f"Failed to load: {e}")
+
+        st.markdown("---")
+
         colA, colB = st.columns([1, 6])
         with colA:
-            loadClicked = st.button("Load", use_container_width=True)
-            refreshClicked = st.button("Refresh", use_container_width=True)
-        if refreshClicked:
-            # Soft refresh: reload current records if any were previously loaded
+            load_clicked = st.button("Load", use_container_width=True)
+        if load_clicked:
             try:
-                st.session_state.global_records = loadGlobalDatabase()
-                st.success("Refreshed.")
-            except Exception as e:
-                st.error(f"Failed to refresh global database: {e}")
-            st.rerun()
-        if loadClicked:
-            try:
-                st.session_state.global_records = loadGlobalDatabase()
+                st.session_state.global_records = load_global_database()
             except Exception as e:
                 st.error(f"Failed to load global database: {e}")
 
@@ -224,11 +205,10 @@ def main() -> None:
         if records is None:
             st.info("Click Load to view the global database.")
         else:
-            df_editor = toEditorDataframe(records)
+            df_editor = to_editor_dataframe(records)
             if df_editor.empty:
                 st.info("No entries found in the global database.")
             else:
-                # Display total count above the table
                 total_items = len(records)
                 st.info(f"📊 **Total items in Global Database:** {total_items:,}")
 
@@ -255,15 +235,14 @@ def main() -> None:
 
                 delete_col, _ = st.columns([1, 5])
                 with delete_col:
-                    deleteClicked = st.button(
+                    delete_clicked = st.button(
                         "Delete selected",
                         type="secondary",
                         use_container_width=True,
                         disabled=bool(st.session_state.get("isWriting")),
                     )
 
-                if deleteClicked:
-                    # Compute selected normalized values from original records
+                if delete_clicked:
                     try:
                         selected_mask = edited_df["selected"] == True  # noqa: E712
                         selected_indices = edited_df[selected_mask].index.tolist()
@@ -283,12 +262,11 @@ def main() -> None:
                             st.session_state.isWriting = True
                             with st.spinner("Deleting from Cloud DB…"):
                                 db = DatabaseManager()
-                                removed = asyncio.run(
+                                removed = run_async(
                                     db.remove_from_global_database_by_normalized(selected_normalized)
                                 )
                             st.session_state.isWriting = False
-                            # Reload from remote to reflect the latest state
-                            st.session_state.global_records = loadGlobalDatabase()
+                            st.session_state.global_records = load_global_database()
                             st.success(f"Deleted {removed} item(s) from the global database.")
                             st.rerun()
                         except Exception as e:
@@ -296,95 +274,101 @@ def main() -> None:
                             st.error(f"Failed to delete selected rows: {str(e)}")
 
     # --- User Selection Tab ---
-    with tabUserSelection:
+    with tab_user_selection:
         st.subheader("User Selection")
-        st.caption(
-            "Presents one locally selected item at a time without loading the global database."
-        )
+        st.caption("Presents one locally selected item at a time without loading the global database.")
 
-        # Check for Cloud DB availability and show status
+        # Check Cloud DB availability
         try:
-            # Test Cloud DB connection by trying to load a small amount of data
-            test_records = loadGlobalDatabase()
-            cloud_db_status = "✅ Cloud DB Available"
+            _ = load_global_database()  # lightweight sanity check
+            st.success("✅ Cloud DB Available")
+            cloud_ok = True
         except Exception as e:
-            cloud_db_status = f"❌ Cloud DB Unavailable: {str(e)}"
-            st.error(f"**Cloud Database Error**: {str(e)}")
-            st.error("The system cannot check for duplicates or add new items until the Cloud DB is available.")
-            st.error("Please check your internet connection and Cloud DB configuration.")
+            cloud_ok = False
+            st.error(f"❌ Cloud DB Unavailable: {e}")
+            st.error("Cannot check for duplicates or add new items until Cloud DB is available.")
 
-        # Only trigger prefetch if Cloud DB is available
-        if "❌" not in cloud_db_status:
-            # Automatic prefetch with better triggering
-            current_time = time.time()
-            last_check_key = "last_prefetch_check"
+        # Auto top-up (best effort), only if cloud is OK
+        if cloud_ok:
+            try:
+                added = top_up_user_selection(target_capacity=10, threshold=7)
+                count_now = get_user_selection_count()
+                if count_now < 7:
+                    st.info(f"Low on items ({count_now}/10) - Auto-population attempted (added {added}).")
+                else:
+                    st.info(f"Items ready: {count_now}")
+            except Exception as e:
+                error_msg = str(e)
+                if "LLM" in error_msg:
+                    st.error(f"🤖 **LLM Processing Error**: {error_msg}")
+                    st.error("The workflow requires LLM processing and cannot proceed without it.")
+                    st.info("💡 **Solution**: Check your xAI API key and credits, or wait for rate limits to reset.")
+                else:
+                    st.error(f"❌ **Workflow Error**: {error_msg}")
 
-            # Check if we should run prefetch (every 30 seconds or if no timestamp)
-            should_check = (
-                last_check_key not in st.session_state or
-                (current_time - st.session_state[last_check_key]) > 30
-            )
+            manual_col = st.columns(1)[0]
+            if manual_col.button("Top up queue now", use_container_width=True):
+                try:
+                    with st.spinner("🤖 Processing with LLM…"):
+                        added = top_up_user_selection(target_capacity=10, threshold=10)
+                    st.success(f"✅ Queued {added} new item(s) via LLM processing.")
+                    st.rerun()
+                except Exception as e:
+                    error_msg = str(e)
+                    if "LLM" in error_msg or "rate limit" in error_msg:
+                        st.error(f"🤖 **LLM Processing Failed**: {error_msg}")
+                        st.error("Cannot proceed without LLM processing. Please check your API key and credits.")
+                    else:
+                        st.error(f"❌ **Processing Error**: {error_msg}")
+                    st.info("🔄 Try again later or contact support if the issue persists.")
 
-            if should_check:
-                st.session_state[last_check_key] = current_time
-                triggerTopUpIfLow(targetCapacity=10)
-
-            # Show prefetch status
-            count = _countUserSelection()
-            if count < 7:
-                st.info(f"⚠️ Low on items ({count}/10) - Auto-population triggered")
-            else:
-                st.info(f"📦 Items ready: {count}")
-        else:
-            st.warning("Prefetching disabled due to Cloud DB unavailability.")
-
-        ensureSessionItemLoaded()
+        ensure_session_item_loaded()
         item: Optional[Dict[str, Any]] = st.session_state.get("currentSelectionItem")
 
         if not item:
             st.success("No items waiting for review in USER_SELECTION.json")
             return
 
-        cleanedText = str(item.get("cleaned") or "").strip()
-        defaultText = str(item.get("default") or "").strip()
-        normalizedText = str(item.get("normalized") or "").strip()
+        cleaned_text = str(item.get("cleaned") or "").strip()
+        default_text = str(item.get("default") or "").strip()
+        normalized_text = str(item.get("normalized") or "").strip()
 
-        # Busy flag to block UI during DB writes
         if "isWriting" not in st.session_state:
             st.session_state.isWriting = False
 
         st.write("Cleaned")
-        st.code(cleanedText or "(empty)")
+        st.code(cleaned_text or "(empty)")
         with st.expander("Details", expanded=False):
             st.write("Default")
-            st.code(defaultText or "(empty)")
+            st.code(default_text or "(empty)")
             st.write("Normalized")
-            st.code(normalizedText or "(empty)")
+            st.code(normalized_text or "(empty)")
 
-        colKeep, colRemove = st.columns(2)
-        with colKeep:
-            keepClicked = st.button(
+        col_keep, col_remove = st.columns(2)
+        with col_keep:
+            keep_clicked = st.button(
                 "Keep — Add to Global DB",
                 type="primary",
                 use_container_width=True,
                 disabled=bool(st.session_state.isWriting),
             )
-        with colRemove:
-            removeClicked = st.button(
+        with col_remove:
+            remove_clicked = st.button(
                 "Remove — Discard",
+                type="secondary",
                 use_container_width=True,
                 disabled=bool(st.session_state.isWriting),
             )
 
-        if keepClicked:
+        if keep_clicked:
             try:
                 st.session_state.isWriting = True
                 with st.spinner("Writing to Cloud DB…"):
                     db = DatabaseManager()
-                    asyncio.run(db.add_to_global_database({
-                        "default": defaultText,
-                        "cleaned": cleanedText,
-                        "normalized": normalizedText,
+                    run_async(db.add_to_global_database({
+                        "default": default_text,
+                        "cleaned": cleaned_text,
+                        "normalized": normalized_text,
                     }))
                 st.session_state.isWriting = False
                 st.session_state.currentSelectionItem = None
@@ -392,309 +376,13 @@ def main() -> None:
                 st.rerun()
             except Exception as e:
                 st.session_state.isWriting = False
-                st.error(f"**Failed to add to global database**: {str(e)}")
-                st.error("This could be due to:")
-                st.error("- Network connectivity issues")
-                st.error("- Cloud DB configuration problems")
-                st.error("- Duplicate entry (already exists in database)")
-                st.error("Please check your connection and try again.")
+                st.error(f"Failed to add to global database: {str(e)}")
+                st.error("Possible causes: network issues, Cloud DB config problems, or duplicate entry.")
 
-        if removeClicked:
+        if remove_clicked:
             st.session_state.currentSelectionItem = None
             st.info("Item discarded.")
             st.rerun()
 
-    # --- Prompt Distribution Tab ---
-    with tabDistribution:
-        st.subheader("Prompt Length Distribution Analysis")
-        st.caption("Shows the probability distribution used for sampling prompts by character length.")
-
-        col1, col2 = st.columns([1, 1])
-
-        with col1:
-            if st.button("Analyze Distribution", use_container_width=True):
-                with st.spinner("Analyzing prompt lengths..."):
-                    try:
-                        # Load or calculate statistics
-                        stats = load_length_statistics()
-                        if not stats:
-                            stats = analyze_prompt_lengths("raw_stripped.txt")
-
-                        st.session_state.distribution_stats = stats
-                        st.success("Analysis complete!")
-                    except Exception as e:
-                        st.error(f"Error analyzing distribution: {e}")
-
-        with col2:
-            if st.button("Refresh Statistics", use_container_width=True):
-                with st.spinner("Recalculating statistics..."):
-                    try:
-                        stats = analyze_prompt_lengths("raw_stripped.txt")
-                        st.session_state.distribution_stats = stats
-                        st.success("Statistics refreshed!")
-                    except Exception as e:
-                        st.error(f"Error refreshing statistics: {e}")
-
-        # Display statistics
-        if 'distribution_stats' in st.session_state:
-            stats = st.session_state.distribution_stats
-
-            st.markdown("### Statistics")
-            col_stats1, col_stats2, col_stats3, col_stats4, col_stats5 = st.columns(5)
-
-            with col_stats1:
-                st.metric("Total Prompts", f"{int(stats['count']):,}")
-            with col_stats2:
-                st.metric("Average Length", f"{stats['mean']:.1f} chars")
-            with col_stats3:
-                st.metric("Std Deviation", f"{stats['std']:.1f} chars")
-            with col_stats4:
-                st.metric("Min Length", f"{stats['min']} chars")
-            with col_stats5:
-                st.metric("Max Length", f"{stats['max']} chars")
-
-            # Generate and display the distribution curve
-            st.markdown("### Probability Distribution Curve")
-
-            # Create the plot
-            curve_points = get_distribution_curve(
-                mean=stats['mean'],
-                std=stats['std'],
-                min_length=int(stats['min']),
-                max_length=int(stats['max'])
-            )
-
-            # Convert to numpy arrays for plotting
-            x_values = [point[0] for point in curve_points]
-            y_values = [point[1] for point in curve_points]
-
-            # Create the plot
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(x_values, y_values, 'b-', linewidth=3, label='Custom Curve Probability')
-            ax.fill_between(x_values, y_values, alpha=0.4, color='blue')
-
-            # Add vertical line at mean (peak)
-            ax.axvline(x=stats['mean'], color='red', linestyle='--', linewidth=2,
-                      label=f'Peak ({stats["mean"]:.1f})')
-
-            # Add vertical line at target (200 chars)
-            ax.axvline(x=200, color='green', linestyle=':', linewidth=2,
-                      label='Target (200 chars)')
-
-            # Add vertical line at 100 chars for reference
-            ax.axvline(x=100, color='purple', linestyle=':', linewidth=1,
-                      label='Reference (100 chars)')
-
-            ax.set_xlabel('Prompt Length (characters)')
-            ax.set_ylabel('Probability Density')
-            ax.set_title('Custom Probability Distribution (Peaks at Mean, Gradually Decreases)')
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-
-            # Set better x-axis limits to show the gradual decline
-            ax.set_xlim(0, 250)
-
-            # Display the plot
-            st.pyplot(fig)
-
-            # Add explanation
-            st.markdown("""
-            ### How the Custom Curve Sampling Works
-
-            The custom probability distribution is designed to create a "circle shaped curve from top" that gradually decreases:
-
-            - **Peak probability**: Maximum probability at the mean (29.7 characters) - this is where selection peaks
-            - **Steep initial drop**: Sharp decline for prompts much shorter than the mean
-            - **Gradual decline**: Smooth, gradual decrease from the peak towards 200 characters
-            - **Target landing**: The curve approaches zero around 200 characters as requested
-
-            ### Key Features:
-
-            - 🎯 **Peaks at mean**: Highest selection probability for prompts around 29.7 characters
-            - 📉 **Gradual decline**: Unlike the symmetric bell curve, this gradually decreases to the right
-            - 🎨 **Custom shape**: Designed to create the "circle shaped curve from top" effect you wanted
-            - 🎲 **Weighted sampling**: Each prompt gets a weight based on its position on this custom curve
-
-            The algorithm calculates a weight for each prompt based on its position on this custom curve, then uses weighted random sampling without replacement to select items.
-            """)
-
-    # --- Raw File Management Tab ---
-    with tabRawStripped:
-        st.subheader("Raw Stripped File Management")
-        st.caption("Remove lines from raw_strippped.txt in cloud storage that contain specific words/phrases.")
-
-        # Input field for parameters
-        st.markdown("### Enter words/phrases to remove")
-        st.caption("Enter words or phrases separated by commas. Lines containing these (as whole words) will be removed.")
-
-        # Text input for removal parameters
-        removal_params = st.text_input(
-            "Words/phrases to remove:",
-            placeholder="e.g., spam, advertisement, promotional",
-            help="Enter comma-separated words or phrases to remove lines containing them"
-        )
-
-        # Display current status
-        try:
-            bucket_name = getBucketName()
-            object_name = getRawStrippedObjectName()
-            st.info(f"📁 Target file: `{object_name}` in bucket `{bucket_name}`")
-        except Exception as e:
-            st.error(f"❌ Configuration error: {e}")
-            st.stop()
-
-        col1, col2 = st.columns([2, 1])
-
-        with col1:
-            # Button to execute removal
-            run_button = st.button(
-                "🔧 Remove Lines",
-                type="primary",
-                use_container_width=True,
-                disabled=not removal_params.strip()
-            )
-
-        with col2:
-            # Button to view current file info
-            info_button = st.button(
-                "📊 File Info",
-                use_container_width=True
-            )
-
-        # Handle file info request
-        if info_button:
-            try:
-                with st.spinner("Loading file information..."):
-                    apt_json_path = getAptJsonPath()
-                    credentials = loadCredentialsFromAptJson(apt_json_path)
-                    client = getStorageClient(credentials)
-                    bucket_name = getBucketName()
-                    object_name = getRawStrippedObjectName()
-
-                    # Download the file to get info
-                    content, generation = downloadTextFile(client, bucket_name, object_name)
-
-                    if content:
-                        lines = content.split('\n')
-                        total_lines = len(lines)
-                        non_empty_lines = len([line for line in lines if line.strip()])
-
-                        st.success("✅ File information loaded!")
-                        col_info1, col_info2, col_info3 = st.columns(3)
-                        with col_info1:
-                            st.metric("Total Lines", f"{total_lines:,}")
-                        with col_info2:
-                            st.metric("Non-empty Lines", f"{non_empty_lines:,}")
-                        with col_info3:
-                            st.metric("File Size", f"{len(content):,} bytes")
-                    else:
-                        st.warning("⚠️ File is empty or doesn't exist")
-
-            except Exception as e:
-                st.error(f"❌ Error loading file information: {e}")
-
-        # Handle removal execution
-        if run_button and removal_params.strip():
-            try:
-                # Parse the input parameters
-                params = [param.strip() for param in removal_params.split(',') if param.strip()]
-
-                if not params:
-                    st.warning("⚠️ No valid parameters provided")
-                else:
-                    with st.spinner("Processing file..."):
-                        # Get cloud storage configuration
-                        apt_json_path = getAptJsonPath()
-                        credentials = loadCredentialsFromAptJson(apt_json_path)
-                        client = getStorageClient(credentials)
-                        bucket_name = getBucketName()
-                        object_name = getRawStrippedObjectName()
-
-                        # Download the file
-                        st.text("📥 Downloading file from cloud...")
-                        content, generation = downloadTextFile(client, bucket_name, object_name)
-
-                        if not content:
-                            st.warning("⚠️ File is empty or doesn't exist")
-                        else:
-                            # Save content to temporary file for processing
-                            import tempfile
-                            import os
-
-                            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as temp_file:
-                                temp_file.write(content)
-                                temp_file_path = temp_file.name
-
-                            try:
-                                # Count original lines
-                                original_lines = len(content.split('\n'))
-
-                                # Apply removal function
-                                st.text(f"🔧 Removing lines containing: {', '.join(params)}")
-                                remove_lines_containing(temp_file_path, params)
-
-                                # Read the processed content
-                                with open(temp_file_path, 'r', encoding='utf-8') as f:
-                                    processed_content = f.read()
-
-                                # Count remaining lines
-                                remaining_lines = len(processed_content.split('\n'))
-                                removed_lines = original_lines - remaining_lines
-
-                                # Upload back to cloud
-                                st.text("📤 Uploading modified file to cloud...")
-                                uploadTextFile(client, bucket_name, object_name, processed_content, generation)
-
-                                st.success(f"✅ Successfully processed file!")
-                                st.info(f"📊 Lines removed: {removed_lines:,} | Lines remaining: {remaining_lines:,}")
-
-                                # Show preview of changes
-                                with st.expander("🔍 Preview Changes", expanded=False):
-                                    st.markdown("**Parameters removed:**")
-                                    for param in params:
-                                        st.markdown(f"- `{param}`")
-
-                                    if removed_lines > 0:
-                                        st.markdown(f"**Summary:** Removed {removed_lines:,} lines containing the specified words/phrases")
-                                    else:
-                                        st.info("No lines were removed - no matches found")
-
-                            finally:
-                                # Clean up temporary file
-                                os.unlink(temp_file_path)
-
-            except Exception as e:
-                st.error(f"❌ Error processing file: {e}")
-                st.error("Please check your cloud storage configuration and try again.")
-
-        # Additional help section
-        with st.expander("ℹ️ How it works", expanded=False):
-            st.markdown("""
-            ### How Line Removal Works
-
-            1. **Download**: The raw_strippped.txt file is downloaded from Google Cloud Storage
-            2. **Process**: Lines containing any of the specified words/phrases are removed
-            3. **Upload**: The modified file is uploaded back to cloud storage
-
-            ### Matching Rules
-
-            - **Case-insensitive**: 'Spam' matches 'SPAM', 'spam', 'SpAm', etc.
-            - **Whole words only**: 'test' matches 'test' but not 'testing' or 'attest'
-            - **Multiple parameters**: You can specify multiple words/phrases separated by commas
-            - **Exact removal**: Only lines containing the specified terms are removed
-
-            ### Example Usage
-
-            If you enter: `spam, advertisement, promotional`
-
-            - ✅ Removes: "This is spam content"
-            - ✅ Removes: "Check out this advertisement"
-            - ✅ Removes: "Promotional material here"
-            - ❌ Keeps: "This is a normal message"
-            """)
-
-
 if __name__ == "__main__":
     main()
-
-

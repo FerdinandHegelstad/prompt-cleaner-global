@@ -9,7 +9,7 @@ from typing import List
 from database import DatabaseManager
 from analyse_item import Item
 from llm import call_llm
-from normalizer import normalize
+from text_utils import normalize
 from probability_sampler import analyze_prompt_lengths, probabilistic_sample, load_length_statistics
 from cloud_storage import downloadTextFile, getStorageClient, loadCredentialsFromAptJson, uploadTextFile
 from config import getAptJsonPath, getBucketName, getRawStrippedObjectName
@@ -103,20 +103,28 @@ class Workflow:
     async def _process_single_item(self, item: Item) -> None:
         """Processes a single item: cleans, normalizes, checks db, adds if unique.
 
+        This function will ALWAYS go through LLM processing - there is no fallback.
+        If LLM fails, the entire workflow fails.
+
         Args:
             item: The Item to process.
+
+        Raises:
+            Exception: If LLM processing fails or any step in the workflow fails.
         """
+        # Call LLM - this will either succeed or raise an exception
+        # NO fallback to original text - LLM processing is mandatory
         cleaned = await call_llm(item.default)
-        if cleaned is None:
-            return
 
         # Post-process the LLM output to enforce one non-empty line
         cleaned = cleaned.strip()
         if not cleaned:
-            return
+            raise ValueError(f"LLM returned empty result for input: {item.default}")
+
         # If multiple lines were returned, keep the first
         if "\n" in cleaned:
             cleaned = cleaned.splitlines()[0].strip()
+
         # Strip simple surrounding quotes
         if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
             cleaned = cleaned[1:-1].strip()
@@ -124,7 +132,8 @@ class Workflow:
         item.cleaned = cleaned
         normalized = normalize(cleaned).strip()
         if not normalized:
-            return
+            raise ValueError(f"Normalization resulted in empty string for cleaned text: {cleaned}")
+
         item.normalized = normalized
 
         # Always check for duplicates against Cloud DB
@@ -133,11 +142,14 @@ class Workflow:
         except Exception as e:
             # Re-raise with clear context for UI error handling
             raise RuntimeError(f"Failed to check for duplicates against Cloud DB: {e}")
-        
+
         if not exists:
             # Add locally for user review only. The UI's Keep action will
             # perform the append to the global database explicitly.
             await self.db_manager.add_to_user_selection(item.to_dict())
+        else:
+            # Still log that we found a duplicate
+            print(f"Skipping duplicate item: {item.normalized[:50]}...")
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:
