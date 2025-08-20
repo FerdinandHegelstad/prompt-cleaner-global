@@ -19,9 +19,15 @@ def getBucketName() -> str:
             print(f"DEBUG: Streamlit secrets available: {hasattr(st, 'secrets')}")
             if hasattr(st, 'secrets'):
                 print(f"DEBUG: Available secrets sections: {list(st.secrets.keys()) if st.secrets else 'No secrets'}")
-                if 'gcs' in st.secrets:
+
+                # Try environment section first (professional format)
+                if 'environment' in st.secrets and 'GCS_BUCKET' in st.secrets['environment']:
+                    bucketName = st.secrets['environment']['GCS_BUCKET']
+                    print(f"DEBUG: Bucket name from environment section: {bucketName}")
+                # Try gcs section as fallback
+                elif 'gcs' in st.secrets and 'bucket_name' in st.secrets['gcs']:
                     bucketName = st.secrets['gcs']['bucket_name']
-                    print(f"DEBUG: Bucket name from secrets: {bucketName}")
+                    print(f"DEBUG: Bucket name from gcs section: {bucketName}")
         except Exception as e:
             print(f"DEBUG: Error loading from Streamlit secrets: {e}")
 

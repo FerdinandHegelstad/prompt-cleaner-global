@@ -21,9 +21,9 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
     try:
         import streamlit as st
         if hasattr(st, 'secrets'):
-            # Try new format first
+            # Try new format first (professional coder's format)
             if 'connections' in st.secrets and 'gcs' in st.secrets['connections']:
-                print("DEBUG: Using Streamlit GCS connection")
+                print("DEBUG: Using Streamlit GCS connection (professional format)")
                 # Create credentials from the connection parameters
                 gcs_config = st.secrets['connections']['gcs']
                 credentials_dict = {
