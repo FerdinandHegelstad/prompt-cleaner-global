@@ -41,7 +41,7 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
                 print("DEBUG: Successfully created credentials from connections.gcs")
                 return service_account.Credentials.from_service_account_info(credentials_dict)
 
-            # Try old format as fallback
+            # Try old format as fallback with simpler parsing
             elif 'google_cloud' in st.secrets:
                 print("DEBUG: Using old google_cloud format")
                 import json
@@ -49,18 +49,31 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
                 print(f"DEBUG: Raw credentials type: {type(credentials_raw)}")
                 print(f"DEBUG: Raw credentials length: {len(str(credentials_raw))}")
 
-                if isinstance(credentials_raw, str):
-                    # Try to clean the JSON string
-                    cleaned_json = credentials_raw.strip()
-                    # Remove potential BOM or invisible characters
-                    cleaned_json = cleaned_json.encode('utf-8').decode('utf-8-sig')
-                    print(f"DEBUG: First 200 chars of cleaned JSON: {cleaned_json[:200]}")
-                    credentials_dict = json.loads(cleaned_json)
-                else:
-                    credentials_dict = credentials_raw
+                try:
+                    # Try direct parsing first
+                    if isinstance(credentials_raw, str):
+                        credentials_dict = json.loads(credentials_raw)
+                    else:
+                        credentials_dict = credentials_raw
 
-                print("DEBUG: Successfully created credentials from google_cloud")
-                return service_account.Credentials.from_service_account_info(credentials_dict)
+                    print("DEBUG: Successfully created credentials from google_cloud")
+                    return service_account.Credentials.from_service_account_info(credentials_dict)
+                except json.JSONDecodeError as e:
+                    print(f"DEBUG: JSON decode error: {e}")
+                    # Try to extract JSON from the string if it's wrapped in triple quotes
+                    if isinstance(credentials_raw, str):
+                        import re
+                        json_match = re.search(r'\{.*\}', credentials_raw, re.DOTALL)
+                        if json_match:
+                            try:
+                                credentials_dict = json.loads(json_match.group())
+                                print("DEBUG: Successfully parsed JSON using regex extraction")
+                                return service_account.Credentials.from_service_account_info(credentials_dict)
+                            except Exception as e2:
+                                print(f"DEBUG: Regex extraction failed: {e2}")
+
+                    print("DEBUG: All JSON parsing methods failed")
+                    raise
             else:
                 print("DEBUG: No GCS connection format found")
         else:
