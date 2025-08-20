@@ -21,10 +21,8 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
     try:
         import streamlit as st
         if hasattr(st, 'secrets'):
-            # Try new format first (professional coder's format)
+            # Use professional Streamlit GCS connection format
             if 'connections' in st.secrets and 'gcs' in st.secrets['connections']:
-                print("DEBUG: Using Streamlit GCS connection (professional format)")
-                # Create credentials from the connection parameters
                 gcs_config = st.secrets['connections']['gcs']
                 credentials_dict = {
                     'type': gcs_config['type'],
@@ -38,42 +36,10 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
                     'auth_provider_x509_cert_url': gcs_config['auth_provider_x509_cert_url'],
                     'client_x509_cert_url': gcs_config['client_x509_cert_url']
                 }
-                print("DEBUG: Successfully created credentials from connections.gcs")
                 return service_account.Credentials.from_service_account_info(credentials_dict)
 
-            # Try old format as fallback with simpler parsing
-            elif 'google_cloud' in st.secrets:
-                print("DEBUG: Using old google_cloud format")
-                import json
-                credentials_raw = st.secrets['google_cloud']['credentials']
-                print(f"DEBUG: Raw credentials type: {type(credentials_raw)}")
-                print(f"DEBUG: Raw credentials length: {len(str(credentials_raw))}")
-
-                try:
-                    # Try direct parsing first
-                    if isinstance(credentials_raw, str):
-                        credentials_dict = json.loads(credentials_raw)
-                    else:
-                        credentials_dict = credentials_raw
-
-                    print("DEBUG: Successfully created credentials from google_cloud")
-                    return service_account.Credentials.from_service_account_info(credentials_dict)
-                except json.JSONDecodeError as e:
-                    print(f"DEBUG: JSON decode error: {e}")
-                    # Try to extract JSON from the string if it's wrapped in triple quotes
-                    if isinstance(credentials_raw, str):
-                        import re
-                        json_match = re.search(r'\{.*\}', credentials_raw, re.DOTALL)
-                        if json_match:
-                            try:
-                                credentials_dict = json.loads(json_match.group())
-                                print("DEBUG: Successfully parsed JSON using regex extraction")
-                                return service_account.Credentials.from_service_account_info(credentials_dict)
-                            except Exception as e2:
-                                print(f"DEBUG: Regex extraction failed: {e2}")
-
-                    print("DEBUG: All JSON parsing methods failed")
-                    raise
+            # Since we're using the professional format, we can remove the old fallback
+            # The connections.gcs format is now the standard and preferred method
             else:
                 print("DEBUG: No GCS connection format found")
         else:

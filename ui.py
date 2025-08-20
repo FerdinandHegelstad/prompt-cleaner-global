@@ -80,16 +80,6 @@ def _getProjectPaths() -> Dict[str, Path]:
     }
 
 
-async def async_pop_one_item() -> Optional[Dict[str, Any]]:
-    """Async version of popOneUserSelectionItem for proper async handling."""
-    try:
-        db = DatabaseManager()
-        item = await db.pop_user_selection_item()
-        return item
-    except Exception:
-        return None
-
-
 def popOneUserSelectionItem() -> Optional[Dict[str, Any]]:
     """Remove and return one item from GCS-based user selection.
 
@@ -98,7 +88,8 @@ def popOneUserSelectionItem() -> Optional[Dict[str, Any]]:
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        item = loop.run_until_complete(async_pop_one_item())
+        db = DatabaseManager()
+        item = loop.run_until_complete(db.pop_user_selection_item())
         return item
     except Exception:
         return None
@@ -124,21 +115,12 @@ def ensureSessionItemLoaded() -> None:
         st.session_state.currentSelectionItem = None
 
 
-async def async_count_user_selection() -> int:
-    """Async version of _countUserSelection for proper async handling."""
-    try:
-        db = DatabaseManager()
-        count = await db.get_user_selection_count()
-        return count
-    except Exception:
-        return 0
-
-
 def _countUserSelection() -> int:
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        count = loop.run_until_complete(async_count_user_selection())
+        db = DatabaseManager()
+        count = loop.run_until_complete(db.get_user_selection_count())
         return count
     except Exception:
         return 0
