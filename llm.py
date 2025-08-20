@@ -3,10 +3,11 @@ import os
 from dotenv import load_dotenv # type: ignore
 from openai import AsyncOpenAI # type: ignore
 from typing import Optional
+from config import getXaiApiKey
 
 load_dotenv()
 
-API_KEY = os.getenv('XAI_API_KEY')
+API_KEY = getXaiApiKey()
 BASE_URL = 'https://api.x.ai/v1'
 MODEL = 'grok-4'
 

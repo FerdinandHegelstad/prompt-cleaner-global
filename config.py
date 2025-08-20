@@ -69,3 +69,23 @@ def getUserSelectionObjectName() -> str:
     return objectName or "USER_SELECTION.json"
 
 
+def getXaiApiKey() -> Optional[str]:
+    """Returns the xAI API key for Grok API.
+
+    Reads from environment variable XAI_API_KEY or Streamlit secrets.
+    Returns None if not found (app will work in fallback mode).
+    """
+    apiKey: Optional[str] = os.getenv("XAI_API_KEY")
+
+    # Try to get from Streamlit secrets
+    if not apiKey:
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets') and 'xai' in st.secrets:
+                apiKey = st.secrets['xai']['api_key']
+        except Exception:
+            pass
+
+    return apiKey
+
+
