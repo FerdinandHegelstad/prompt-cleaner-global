@@ -1,4 +1,5 @@
 #!llm.py
+import asyncio
 import os
 from dotenv import load_dotenv # type: ignore
 from openai import AsyncOpenAI # type: ignore
