@@ -108,7 +108,8 @@ def ensureSessionItemLoaded() -> None:
     try:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        item = loop.run_until_complete(async_pop_one_item())
+        db = DatabaseManager()
+        item = loop.run_until_complete(db.pop_user_selection_item())
         st.session_state.currentSelectionItem = item
     except Exception as e:
         st.error(f"Error loading selection item: {e}")
