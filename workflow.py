@@ -38,11 +38,28 @@ class Workflow:
         credentials = loadCredentialsFromAptJson(apt_path)
         self.client = getStorageClient(credentials)
 
-    async def run(self) -> None:
-        """Runs the workflow asynchronously."""
-        items = await self._select_and_remove_items()
-        item_objs = [Item(default=s) for s in items]
-        await self._process_items(item_objs)
+    async def run(self) -> dict:
+        """Runs the workflow asynchronously and returns status information."""
+        try:
+            items = await self._select_and_remove_items()
+            if not items:
+                return {"status": "no_items", "message": "No items to process", "processed": 0, "failed": 0}
+
+            item_objs = [Item(default=s) for s in items]
+            results = await self._process_items(item_objs)
+
+            successful = sum(1 for result in results if result["success"])
+            failed = len(results) - successful
+
+            if failed == len(results):
+                return {"status": "all_failed", "message": "All items failed processing", "processed": successful, "failed": failed}
+            elif failed > 0:
+                return {"status": "partial_success", "message": f"Processed {successful} items, {failed} failed", "processed": successful, "failed": failed}
+            else:
+                return {"status": "success", "message": f"Successfully processed {successful} items", "processed": successful, "failed": failed}
+
+        except Exception as e:
+            return {"status": "error", "message": f"Workflow error: {str(e)}", "processed": 0, "failed": 0}
 
     async def _select_and_remove_items(self) -> List[str]:
         """Selects items using probability-based sampling and removes them from the GCS stripped file.
@@ -71,9 +88,19 @@ class Workflow:
             # Load or calculate length statistics
             stats = load_length_statistics()
             if not stats:
-                # Fallback: calculate statistics if file doesn't exist
-                # For now, we'll use the GCS content for statistics calculation
-                stats = analyze_prompt_lengths(content)
+                # Fallback: calculate statistics from in-memory content
+                lengths = [len(s) for s in items if s]
+                if lengths:
+                    import statistics
+                    stats = {
+                        'count': len(lengths),
+                        'mean': statistics.mean(lengths),
+                        'std': statistics.stdev(lengths) if len(lengths) > 1 else 1.0,
+                        'min': min(lengths),
+                        'max': max(lengths)
+                    }
+                else:
+                    stats = {'count': 0, 'mean': 1.0, 'std': 1.0, 'min': 0, 'max': 0}
 
             # Use probability-based sampling
             selected_items = probabilistic_sample(
@@ -92,64 +119,85 @@ class Workflow:
 
         return selected_items
 
-    async def _process_items(self, item_objs: List[Item]) -> None:
-        """Processes items concurrently.
+    async def _process_items(self, item_objs: List[Item]) -> List[dict]:
+        """Processes items concurrently and returns results.
 
         Args:
             item_objs: List of Item objects.
-        """
-        await asyncio.gather(*[self._process_single_item(item) for item in item_objs])
 
-    async def _process_single_item(self, item: Item) -> None:
+        Returns:
+            List of result dictionaries with success status.
+        """
+        results = await asyncio.gather(*[self._process_single_item(item) for item in item_objs])
+        return results
+
+    async def _process_single_item(self, item: Item) -> dict:
         """Processes a single item: cleans, normalizes, checks db, adds if unique.
 
-        This function will ALWAYS go through LLM processing - there is no fallback.
-        If LLM fails, the entire workflow fails.
+        This function will attempt LLM processing with better error handling.
+        If LLM fails, it will skip the item instead of crashing the entire workflow.
 
         Args:
             item: The Item to process.
 
-        Raises:
-            Exception: If LLM processing fails or any step in the workflow fails.
+        Returns:
+            Dictionary with success status and message.
         """
-        # Call LLM - this will either succeed or raise an exception
-        # NO fallback to original text - LLM processing is mandatory
-        cleaned = await call_llm(item.default)
-
-        # Post-process the LLM output to enforce one non-empty line
-        cleaned = cleaned.strip()
-        if not cleaned:
-            raise ValueError(f"LLM returned empty result for input: {item.default}")
-
-        # If multiple lines were returned, keep the first
-        if "\n" in cleaned:
-            cleaned = cleaned.splitlines()[0].strip()
-
-        # Strip simple surrounding quotes
-        if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
-            cleaned = cleaned[1:-1].strip()
-
-        item.cleaned = cleaned
-        normalized = normalize(cleaned).strip()
-        if not normalized:
-            raise ValueError(f"Normalization resulted in empty string for cleaned text: {cleaned}")
-
-        item.normalized = normalized
-
-        # Always check for duplicates against Cloud DB
         try:
-            exists = await self.db_manager.exists_in_database(item.normalized) # type: ignore
-        except Exception as e:
-            # Re-raise with clear context for UI error handling
-            raise RuntimeError(f"Failed to check for duplicates against Cloud DB: {e}")
+            print(f"DEBUG: Processing item: {item.default[:50]}...")
 
-        if not exists:
-            # Add locally for user review only. The UI's Keep action will
-            # perform the append to the global database explicitly.
-            await self.db_manager.add_to_user_selection(item.to_dict())
-        else:
-            # Still log that we found a duplicate
-            print(f"Skipping duplicate item: {item.normalized[:50]}...")
+            # Call LLM - this will either succeed or raise an exception
+            cleaned = await call_llm(item.default)
+            print(f"DEBUG: LLM returned: '{cleaned[:100]}...'")
+
+            # Post-process the LLM output to enforce one non-empty line
+            cleaned = cleaned.strip()
+            if not cleaned:
+                print(f"DEBUG: LLM returned empty result for: {item.default[:50]}...")
+                return {"success": False, "message": "LLM returned empty result"}
+
+            # If multiple lines were returned, keep the first
+            if "\n" in cleaned:
+                cleaned = cleaned.splitlines()[0].strip()
+
+            # Strip simple surrounding quotes
+            if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
+                cleaned = cleaned[1:-1].strip()
+
+            item.cleaned = cleaned
+            normalized = normalize(cleaned).strip()
+            if not normalized:
+                print(f"DEBUG: Normalization resulted in empty string for: {cleaned[:50]}...")
+                return {"success": False, "message": "Normalization resulted in empty string"}
+
+            item.normalized = normalized
+            print(f"DEBUG: Normalized to: {normalized[:50]}...")
+
+            # Always check for duplicates against Cloud DB
+            try:
+                exists = await self.db_manager.exists_in_database(item.normalized) # type: ignore
+                print(f"DEBUG: Item exists in database: {exists}")
+            except Exception as e:
+                # Log but don't crash - continue with processing
+                print(f"DEBUG: Failed to check duplicates: {e}")
+                exists = False
+
+            if not exists:
+                # Add locally for user review only. The UI's Keep action will
+                # perform the append to the global database explicitly.
+                await self.db_manager.add_to_user_selection(item.to_dict())
+                print(f"DEBUG: Added item to user selection")
+                return {"success": True, "message": "Item processed and added to selection"}
+            else:
+                # Still log that we found a duplicate
+                print(f"DEBUG: Skipping duplicate item: {item.normalized[:50]}...")
+                return {"success": True, "message": "Item skipped (duplicate)"}
+
+        except Exception as e:
+            # Log the error but continue processing other items
+            error_msg = f"Error processing item '{item.default[:50]}...': {e}"
+            print(f"DEBUG: {error_msg}")
+            return {"success": False, "message": error_msg}
 
 if __name__ == "__main__":
     if len(sys.argv) != 3:

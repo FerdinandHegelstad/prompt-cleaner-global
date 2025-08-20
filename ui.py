@@ -84,46 +84,10 @@ def to_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
 # User Selection helpers
 # -----------------------------
 
-def get_user_selection_count() -> int:
-    try:
-        db = DatabaseManager()
-        count = run_async(db.get_user_selection_count())
-        return int(count)
-    except Exception:
-        return 0
 
 
-def top_up_user_selection(target_capacity: int = 10, threshold: int = 7) -> int:
-    """Ensure the USER_SELECTION queue has at least `threshold` items, by running
-    the Workflow directly (no subprocess, no lock files).
 
-    Returns the number of items added (best effort).
-    """
-    try:
-        current = get_user_selection_count()
-        if current >= threshold:
-            return 0
 
-        deficit = target_capacity - current
-        overfetch = max(deficit, int((deficit * 3.0 + 0.9999)))  # multiplier 3x
-
-        # Check for raw_stripped.txt existence in GCS before running workflow
-        bucket_name = getBucketName()
-        object_name = getRawStrippedObjectName()
-        apt_path = getAptJsonPath()
-        credentials = loadCredentialsFromAptJson(apt_path)
-        client = getStorageClient(credentials)
-        content, _ = downloadTextFile(client, bucket_name, object_name)
-        if not (content and content.strip()):
-            return 0
-
-        workflow = Workflow(object_name, overfetch)
-        run_async(workflow.run())
-
-        after = get_user_selection_count()
-        return max(0, after - current)
-    except Exception:
-        return 0
 
 
 def ensure_session_item_loaded() -> None:
@@ -137,6 +101,110 @@ def ensure_session_item_loaded() -> None:
     except Exception as e:
         st.error(f"Error loading selection item: {e}")
         st.session_state.currentSelectionItem = None
+
+
+@st.cache_resource
+def get_cached_db_manager():
+    """Cache the database manager to avoid recreation."""
+    return DatabaseManager()
+
+
+
+async def auto_populate_user_selection_if_needed() -> None:
+    """Automatically populate USER_SELECTION queue from raw_stripped.txt if needed."""
+    try:
+        db = get_cached_db_manager()
+
+        # Check if USER_SELECTION queue needs more items
+        target_queue_size = 50
+        queue_count = await db.userSelection.get_user_selection_count()
+
+        if queue_count >= target_queue_size:
+            return
+
+        items_needed = target_queue_size - queue_count
+
+        # Check if raw_stripped.txt has content
+        bucket_name = getBucketName()
+        object_name = getRawStrippedObjectName()
+        apt_json_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_json_path)
+        client = getStorageClient(credentials)
+        content, _ = downloadTextFile(client, bucket_name, object_name)
+
+        if not content or not content.strip():
+            return
+
+        lines = content.split('\n')
+        non_empty_lines = len([ln for ln in lines if ln.strip()])
+
+        if non_empty_lines == 0:
+            return
+
+        # Create and run workflow
+        items_to_process = min(items_needed, non_empty_lines)
+        workflow = Workflow(object_name, items_to_process)
+        workflow_result = await workflow.run()
+
+        # Check if workflow had issues
+        if workflow_result["status"] == "all_failed":
+            st.session_state.workflow_error = f"⚠️ **LLM Processing Failed**: {workflow_result['message']}"
+            return
+        elif workflow_result["status"] == "error":
+            st.session_state.workflow_error = f"⚠️ **Workflow Error**: {workflow_result['message']}"
+            return
+        elif workflow_result["failed"] > 0:
+            st.session_state.workflow_warning = f"⚠️ **Partial Success**: {workflow_result['message']}"
+
+    except Exception as e:
+        pass
+
+def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
+    """Fetch multiple items from USER_SELECTION for batch review."""
+    print(f"DEBUG: fetch_batch_items called with batch_size={batch_size}")
+    try:
+        db = get_cached_db_manager()
+        print("DEBUG: Got cached database manager")
+        items = []
+
+        # Check if we can get user selection count
+        count = 0  # Initialize count to avoid unassigned variable error
+        try:
+            count = run_async(db.userSelection.get_user_selection_count())
+            print(f"DEBUG: Current queue count: {count}")
+        except Exception as count_error:
+            print(f"DEBUG: Error getting queue count: {count_error}")
+
+        # If queue is below threshold, try to auto-populate it
+        target_queue_size = 50  # Target to populate up to
+        populate_threshold = 20  # Only populate when below this
+        if count < populate_threshold:
+            print(f"DEBUG: Queue below threshold ({count} < {populate_threshold}), calling auto_populate to reach {target_queue_size}")
+            try:
+                run_async(auto_populate_user_selection_if_needed())
+                print("DEBUG: auto_populate completed")
+            except Exception as populate_error:
+                print(f"DEBUG: Error in auto_populate: {populate_error}")
+
+        print(f"DEBUG: Attempting to fetch {batch_size} items")
+        for i in range(batch_size):
+            try:
+                item = run_async(db.pop_user_selection_item())
+                if item:
+                    items.append(item)
+                    print(f"DEBUG: Fetched item {i+1}: {item.get('cleaned', '')[:50]}...")
+                else:
+                    print(f"DEBUG: No more items available (got {len(items)} items)")
+                    break
+            except Exception as item_error:
+                print(f"DEBUG: Error fetching item {i+1}: {item_error}")
+                break
+
+        print(f"DEBUG: Returning {len(items)} items")
+        return items
+    except Exception as e:
+        print(f"DEBUG: Exception in fetch_batch_items: {e}")
+        return []
 
 
 # -----------------------------
@@ -157,11 +225,7 @@ def main() -> None:
         st.subheader("Global Database: Cleaned Entries")
         st.caption("Loads from Google Cloud Storage only when you click Load.")
 
-        # Status metrics
-        try:
-            st.metric("User Selection Queue", f"{get_user_selection_count():,}", help="Items waiting for review")
-        except Exception as e:
-            st.metric("User Selection Queue", "Error", help=f"Failed to load: {e}")
+
 
         # Raw file info
         try:
@@ -275,114 +339,100 @@ def main() -> None:
 
     # --- User Selection Tab ---
     with tab_user_selection:
-        st.subheader("User Selection")
-        st.caption("Presents one locally selected item at a time without loading the global database.")
+        st.subheader("Batch Review")
 
-        # Check Cloud DB availability
-        try:
-            _ = load_global_database()  # lightweight sanity check
-            st.success("✅ Cloud DB Available")
-            cloud_ok = True
-        except Exception as e:
-            cloud_ok = False
-            st.error(f"❌ Cloud DB Unavailable: {e}")
-            st.error("Cannot check for duplicates or add new items until Cloud DB is available.")
+        # Initialize session state variables (completely local, no network calls)
+        if "batch_items" not in st.session_state:
+            st.session_state.batch_items = []
+        if "discard_actions" not in st.session_state:
+            st.session_state.discard_actions = set()
+        if "batch_id" not in st.session_state:
+            st.session_state.batch_id = 0
 
-        # Auto top-up (best effort), only if cloud is OK
-        if cloud_ok:
-            try:
-                added = top_up_user_selection(target_capacity=10, threshold=7)
-                count_now = get_user_selection_count()
-                if count_now < 7:
-                    st.info(f"Low on items ({count_now}/10) - Auto-population attempted (added {added}).")
+        # Fetch items if none exist
+        if not st.session_state.batch_items:
+            print("DEBUG: No batch items, calling fetch_batch_items")
+            with st.spinner("Loading batch items..."):
+                items = fetch_batch_items(5)
+                print(f"DEBUG: Initial fetch returned {len(items) if items else 0} items")
+                if items:
+                    st.session_state.batch_items = items
+                    st.session_state.batch_id += 1  # Set initial batch_id
+                    print(f"DEBUG: Set initial batch items, batch_id: {st.session_state.batch_id}")
                 else:
-                    st.info(f"Items ready: {count_now}")
-            except Exception as e:
-                error_msg = str(e)
-                if "LLM" in error_msg:
-                    st.error(f"🤖 **LLM Processing Error**: {error_msg}")
-                    st.error("The workflow requires LLM processing and cannot proceed without it.")
-                    st.info("💡 **Solution**: Check your xAI API key and credits, or wait for rate limits to reset.")
-                else:
-                    st.error(f"❌ **Workflow Error**: {error_msg}")
+                    print("DEBUG: No initial items, returning")
+                    return
 
-            manual_col = st.columns(1)[0]
-            if manual_col.button("Top up queue now", use_container_width=True):
+        # Display batch items
+        if st.session_state.batch_items:
+            # Display all items (don't process discards until Fetch Next is clicked)
+            for i, item in enumerate(st.session_state.batch_items):
+                col1, col2 = st.columns([1, 6])
+
+                with col1:
+                    discard_key = f"discard_{i}"
+                    # Use a checkbox instead of button to avoid rerun delays
+                    # Use batch_id in key to ensure checkboxes reset for new batches
+                    checkbox_key = f"discard_check_{st.session_state.batch_id}_{i}"
+                    if st.checkbox("Discard", key=checkbox_key):
+                        st.session_state.discard_actions.add(discard_key)
+
+                with col2:
+                    cleaned_text = str(item.get("cleaned") or "").strip()
+                    st.text(cleaned_text or "(empty)")
+
+                st.markdown("---")
+
+            # Fetch next button
+            if st.button("Fetch Next 5 Items (Keep rest)", use_container_width=True, type="primary"):
+                print("DEBUG: Fetch Next button clicked!")
+
+                # Process discards and keep only non-discarded items
+                if st.session_state.batch_items:
+                    print(f"DEBUG: Processing {len(st.session_state.batch_items)} items")
+                    try:
+                        db = get_cached_db_manager()
+                        print("DEBUG: Got database manager")
+                        # Only keep items that are not marked for discard
+                        kept_count = 0
+                        for i, item in enumerate(st.session_state.batch_items):
+                            discard_key = f"discard_{i}"
+                            if discard_key not in st.session_state.discard_actions:
+                                # Item not discarded, keep it
+                                try:
+                                    run_async(db.add_to_global_database(item))
+                                    kept_count += 1
+                                    print(f"DEBUG: Kept item {i}")
+                                except Exception as e:
+                                    print(f"DEBUG: Failed to keep item {i}: {e}")
+                            else:
+                                print(f"DEBUG: Discarded item {i}")
+                    except Exception as e:
+                        print(f"DEBUG: Database manager error: {e}")
+
+                # Clear and fetch new items
+                print("DEBUG: Clearing current batch")
+                st.session_state.batch_items = []
+                st.session_state.discard_actions.clear()
+
+                # Fetch new items
+                print("DEBUG: Fetching new items...")
                 try:
-                    with st.spinner("🤖 Processing with LLM…"):
-                        added = top_up_user_selection(target_capacity=10, threshold=10)
-                    st.success(f"✅ Queued {added} new item(s) via LLM processing.")
-                    st.rerun()
-                except Exception as e:
-                    error_msg = str(e)
-                    if "LLM" in error_msg or "rate limit" in error_msg:
-                        st.error(f"🤖 **LLM Processing Failed**: {error_msg}")
-                        st.error("Cannot proceed without LLM processing. Please check your API key and credits.")
+                    items = fetch_batch_items(5)
+                    print(f"DEBUG: fetch_batch_items returned {len(items) if items else 0} items")
+                    if items:
+                        st.session_state.batch_items = items
+                        st.session_state.batch_id += 1  # Increment batch_id for unique checkbox keys
+                        print(f"DEBUG: Set new batch items with cleared discard actions, new batch_id: {st.session_state.batch_id}")
                     else:
-                        st.error(f"❌ **Processing Error**: {error_msg}")
-                    st.info("🔄 Try again later or contact support if the issue persists.")
+                        print("DEBUG: No items returned from fetch_batch_items")
+                except Exception as e:
+                    print(f"DEBUG: Error fetching new items: {e}")
 
-        ensure_session_item_loaded()
-        item: Optional[Dict[str, Any]] = st.session_state.get("currentSelectionItem")
-
-        if not item:
-            st.success("No items waiting for review in USER_SELECTION.json")
-            return
-
-        cleaned_text = str(item.get("cleaned") or "").strip()
-        default_text = str(item.get("default") or "").strip()
-        normalized_text = str(item.get("normalized") or "").strip()
-
-        if "isWriting" not in st.session_state:
-            st.session_state.isWriting = False
-
-        st.write("Cleaned")
-        st.code(cleaned_text or "(empty)")
-        with st.expander("Details", expanded=False):
-            st.write("Default")
-            st.code(default_text or "(empty)")
-            st.write("Normalized")
-            st.code(normalized_text or "(empty)")
-
-        col_keep, col_remove = st.columns(2)
-        with col_keep:
-            keep_clicked = st.button(
-                "Keep — Add to Global DB",
-                type="primary",
-                use_container_width=True,
-                disabled=bool(st.session_state.isWriting),
-            )
-        with col_remove:
-            remove_clicked = st.button(
-                "Remove — Discard",
-                type="secondary",
-                use_container_width=True,
-                disabled=bool(st.session_state.isWriting),
-            )
-
-        if keep_clicked:
-            try:
-                st.session_state.isWriting = True
-                with st.spinner("Writing to Cloud DB…"):
-                    db = DatabaseManager()
-                    run_async(db.add_to_global_database({
-                        "default": default_text,
-                        "cleaned": cleaned_text,
-                        "normalized": normalized_text,
-                    }))
-                st.session_state.isWriting = False
-                st.session_state.currentSelectionItem = None
-                st.success("Added to global database.")
+                # Force rerun to update UI
                 st.rerun()
-            except Exception as e:
-                st.session_state.isWriting = False
-                st.error(f"Failed to add to global database: {str(e)}")
-                st.error("Possible causes: network issues, Cloud DB config problems, or duplicate entry.")
 
-        if remove_clicked:
-            st.session_state.currentSelectionItem = None
-            st.info("Item discarded.")
-            st.rerun()
+
 
 if __name__ == "__main__":
     main()

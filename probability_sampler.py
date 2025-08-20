@@ -24,25 +24,13 @@ def analyze_prompt_lengths(file_path: str) -> Dict[str, float]:
     return {
         'count': len(items),
         'mean': statistics.mean(lengths),
-        'std': statistics.stdev(lengths),
+        'std': statistics.stdev(lengths) if len(lengths) > 1 else 1.0,
         'min': min(lengths),
         'max': max(lengths)
     }
 
 
-def normal_pdf(x: float, mean: float, std: float) -> float:
-    """Calculate the probability density function for a normal distribution.
 
-    Args:
-        x: The value to evaluate
-        mean: Mean of the distribution
-        std: Standard deviation of the distribution
-
-    Returns:
-        Probability density at x
-    """
-    variance = std ** 2
-    return (1 / math.sqrt(2 * math.pi * variance)) * math.exp(-((x - mean) ** 2) / (2 * variance))
 
 
 def custom_curve_pdf(x: float, mean: float, target_max: float = 200.0) -> float:

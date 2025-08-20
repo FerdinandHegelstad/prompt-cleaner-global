@@ -15,8 +15,6 @@ from cloud_storage import (
 from config import getAptJsonPath, getBucketName, getDatabaseObjectName, getUserSelectionObjectName
 from text_utils import build_dedup_key
 
-USER_SELECTION_FILE = 'USER_SELECTION.json'
-
 
 class UserSelectionStore:
     """Shared store for user selections in Google Cloud Storage."""
@@ -122,6 +120,8 @@ class UserSelectionStore:
         """Get the count of items in user selection."""
         data = await self._load_json()
         return len(data)
+
+
 
     async def pop_user_selection_item(self) -> Optional[Dict[str, Any]]:
         """Remove and return one item from user selection."""
@@ -315,8 +315,7 @@ class DatabaseManager:
     async def remove_from_global_database_by_normalized(self, normalizedValues: List[str]) -> int:
         return await self.globalStore.remove_from_database_by_normalized(normalizedValues)
 
-    async def get_user_selection_count(self) -> int:
-        return await self.userSelection.get_user_selection_count()
+
 
     async def pop_user_selection_item(self) -> Optional[Dict[str, Any]]:
         return await self.userSelection.pop_user_selection_item()
