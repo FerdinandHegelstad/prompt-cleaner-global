@@ -296,12 +296,11 @@ def main() -> None:
                 if st.button("🔄 Populate User Selection", use_container_width=True):
                     try:
                         # Run prefetcher manually
-                        import subprocess
                         env = os.environ.copy()
                         env['GCS_BUCKET'] = os.environ.get('GCS_BUCKET', 'unfiltered_database')
 
                         result = subprocess.run([
-                            'python3', '-m', 'prefetcher', '5'
+                            'python3', 'prefetcher.py', '5'
                         ], cwd=os.path.dirname(__file__),
                         env=env, capture_output=True, text=True, timeout=30)
 
