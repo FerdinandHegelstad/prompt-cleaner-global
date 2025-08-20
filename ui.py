@@ -228,6 +228,10 @@ def main() -> None:
             if df_editor.empty:
                 st.info("No entries found in the global database.")
             else:
+                # Display total count above the table
+                total_items = len(records)
+                st.info(f"📊 **Total items in Global Database:** {total_items:,}")
+
                 edited_df = st.data_editor(
                     df_editor,
                     key="global_db_editor",
