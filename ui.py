@@ -13,10 +13,11 @@ import matplotlib.pyplot as plt  # type: ignore
 import numpy as np  # type: ignore
 
 try:
-    from cloud_storage import downloadJson, getStorageClient, loadCredentialsFromAptJson
-    from config import getAptJsonPath, getBucketName, getDatabaseObjectName
+    from cloud_storage import downloadJson, downloadTextFile, getStorageClient, loadCredentialsFromAptJson, uploadTextFile
+    from config import getAptJsonPath, getBucketName, getDatabaseObjectName, getRawStrippedObjectName
     from database import DatabaseManager
     from probability_sampler import analyze_prompt_lengths, get_distribution_curve, load_length_statistics
+    from remove_lines import remove_lines_containing
 except ImportError as e:
     st.error(f"Import Error: {e}")
     st.error("This might be due to missing dependencies or module loading issues.")
@@ -172,7 +173,7 @@ def main() -> None:
     st.set_page_config(page_title="Prompt Cleaner UI", layout="wide")
     st.title("Prompt Cleaner")
 
-    tabGlobal, tabUserSelection, tabDistribution = st.tabs(["Global Database", "User Selection", "Prompt Distribution"])  # top-level tabs
+    tabGlobal, tabUserSelection, tabDistribution, tabRawStripped = st.tabs(["Global Database", "User Selection", "Prompt Distribution", "Raw File Management"])  # top-level tabs
 
     # --- Global Database Tab ---
     with tabGlobal:
@@ -495,6 +496,181 @@ def main() -> None:
             - 🎲 **Weighted sampling**: Each prompt gets a weight based on its position on this custom curve
 
             The algorithm calculates a weight for each prompt based on its position on this custom curve, then uses weighted random sampling without replacement to select items.
+            """)
+
+    # --- Raw File Management Tab ---
+    with tabRawStripped:
+        st.subheader("Raw Stripped File Management")
+        st.caption("Remove lines from raw_strippped.txt in cloud storage that contain specific words/phrases.")
+
+        # Input field for parameters
+        st.markdown("### Enter words/phrases to remove")
+        st.caption("Enter words or phrases separated by commas. Lines containing these (as whole words) will be removed.")
+
+        # Text input for removal parameters
+        removal_params = st.text_input(
+            "Words/phrases to remove:",
+            placeholder="e.g., spam, advertisement, promotional",
+            help="Enter comma-separated words or phrases to remove lines containing them"
+        )
+
+        # Display current status
+        try:
+            bucket_name = getBucketName()
+            object_name = getRawStrippedObjectName()
+            st.info(f"📁 Target file: `{object_name}` in bucket `{bucket_name}`")
+        except Exception as e:
+            st.error(f"❌ Configuration error: {e}")
+            st.stop()
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            # Button to execute removal
+            run_button = st.button(
+                "🔧 Remove Lines",
+                type="primary",
+                use_container_width=True,
+                disabled=not removal_params.strip()
+            )
+
+        with col2:
+            # Button to view current file info
+            info_button = st.button(
+                "📊 File Info",
+                use_container_width=True
+            )
+
+        # Handle file info request
+        if info_button:
+            try:
+                with st.spinner("Loading file information..."):
+                    apt_json_path = getAptJsonPath()
+                    credentials = loadCredentialsFromAptJson(apt_json_path)
+                    client = getStorageClient(credentials)
+                    bucket_name = getBucketName()
+                    object_name = getRawStrippedObjectName()
+
+                    # Download the file to get info
+                    content, generation = downloadTextFile(client, bucket_name, object_name)
+
+                    if content:
+                        lines = content.split('\n')
+                        total_lines = len(lines)
+                        non_empty_lines = len([line for line in lines if line.strip()])
+
+                        st.success("✅ File information loaded!")
+                        col_info1, col_info2, col_info3 = st.columns(3)
+                        with col_info1:
+                            st.metric("Total Lines", f"{total_lines:,}")
+                        with col_info2:
+                            st.metric("Non-empty Lines", f"{non_empty_lines:,}")
+                        with col_info3:
+                            st.metric("File Size", f"{len(content):,} bytes")
+                    else:
+                        st.warning("⚠️ File is empty or doesn't exist")
+
+            except Exception as e:
+                st.error(f"❌ Error loading file information: {e}")
+
+        # Handle removal execution
+        if run_button and removal_params.strip():
+            try:
+                # Parse the input parameters
+                params = [param.strip() for param in removal_params.split(',') if param.strip()]
+
+                if not params:
+                    st.warning("⚠️ No valid parameters provided")
+                else:
+                    with st.spinner("Processing file..."):
+                        # Get cloud storage configuration
+                        apt_json_path = getAptJsonPath()
+                        credentials = loadCredentialsFromAptJson(apt_json_path)
+                        client = getStorageClient(credentials)
+                        bucket_name = getBucketName()
+                        object_name = getRawStrippedObjectName()
+
+                        # Download the file
+                        st.text("📥 Downloading file from cloud...")
+                        content, generation = downloadTextFile(client, bucket_name, object_name)
+
+                        if not content:
+                            st.warning("⚠️ File is empty or doesn't exist")
+                        else:
+                            # Save content to temporary file for processing
+                            import tempfile
+                            import os
+
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False, encoding='utf-8') as temp_file:
+                                temp_file.write(content)
+                                temp_file_path = temp_file.name
+
+                            try:
+                                # Count original lines
+                                original_lines = len(content.split('\n'))
+
+                                # Apply removal function
+                                st.text(f"🔧 Removing lines containing: {', '.join(params)}")
+                                remove_lines_containing(temp_file_path, params)
+
+                                # Read the processed content
+                                with open(temp_file_path, 'r', encoding='utf-8') as f:
+                                    processed_content = f.read()
+
+                                # Count remaining lines
+                                remaining_lines = len(processed_content.split('\n'))
+                                removed_lines = original_lines - remaining_lines
+
+                                # Upload back to cloud
+                                st.text("📤 Uploading modified file to cloud...")
+                                uploadTextFile(client, bucket_name, object_name, processed_content, generation)
+
+                                st.success(f"✅ Successfully processed file!")
+                                st.info(f"📊 Lines removed: {removed_lines:,} | Lines remaining: {remaining_lines:,}")
+
+                                # Show preview of changes
+                                with st.expander("🔍 Preview Changes", expanded=False):
+                                    st.markdown("**Parameters removed:**")
+                                    for param in params:
+                                        st.markdown(f"- `{param}`")
+
+                                    if removed_lines > 0:
+                                        st.markdown(f"**Summary:** Removed {removed_lines:,} lines containing the specified words/phrases")
+                                    else:
+                                        st.info("No lines were removed - no matches found")
+
+                            finally:
+                                # Clean up temporary file
+                                os.unlink(temp_file_path)
+
+            except Exception as e:
+                st.error(f"❌ Error processing file: {e}")
+                st.error("Please check your cloud storage configuration and try again.")
+
+        # Additional help section
+        with st.expander("ℹ️ How it works", expanded=False):
+            st.markdown("""
+            ### How Line Removal Works
+
+            1. **Download**: The raw_strippped.txt file is downloaded from Google Cloud Storage
+            2. **Process**: Lines containing any of the specified words/phrases are removed
+            3. **Upload**: The modified file is uploaded back to cloud storage
+
+            ### Matching Rules
+
+            - **Case-insensitive**: 'Spam' matches 'SPAM', 'spam', 'SpAm', etc.
+            - **Whole words only**: 'test' matches 'test' but not 'testing' or 'attest'
+            - **Multiple parameters**: You can specify multiple words/phrases separated by commas
+            - **Exact removal**: Only lines containing the specified terms are removed
+
+            ### Example Usage
+
+            If you enter: `spam, advertisement, promotional`
+
+            - ✅ Removes: "This is spam content"
+            - ✅ Removes: "Check out this advertisement"
+            - ✅ Removes: "Promotional material here"
+            - ❌ Keeps: "This is a normal message"
             """)
 
 
