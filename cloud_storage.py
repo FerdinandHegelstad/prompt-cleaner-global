@@ -22,15 +22,28 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
         import streamlit as st
         if hasattr(st, 'secrets') and 'google_cloud' in st.secrets:
             import json
-            credentials_dict = st.secrets['google_cloud']['credentials']
-            if isinstance(credentials_dict, str):
-                credentials_dict = json.loads(credentials_dict)
+            credentials_raw = st.secrets['google_cloud']['credentials']
+            print(f"DEBUG: Raw credentials type: {type(credentials_raw)}")
+            print(f"DEBUG: Raw credentials length: {len(str(credentials_raw))}")
+
+            if isinstance(credentials_raw, str):
+                # Clean up the JSON string - remove extra whitespace and potential control characters
+                cleaned_json = credentials_raw.strip()
+                # Remove potential BOM or invisible characters
+                cleaned_json = cleaned_json.encode('utf-8').decode('utf-8-sig')
+                print(f"DEBUG: First 200 chars of cleaned JSON: {cleaned_json[:200]}")
+                credentials_dict = json.loads(cleaned_json)
+            else:
+                credentials_dict = credentials_raw
+
             print("DEBUG: Loading credentials from Streamlit secrets")
             return service_account.Credentials.from_service_account_info(credentials_dict)
         else:
             print("DEBUG: Streamlit secrets not available or missing google_cloud section")
     except Exception as e:
         print(f"DEBUG: Error loading from Streamlit secrets: {e}")
+        import traceback
+        print(f"DEBUG: Full traceback: {traceback.format_exc()}")
 
     # Fall back to file-based loading
     if not aptJsonPath:

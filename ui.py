@@ -12,10 +12,15 @@ import streamlit as st  # type: ignore
 import matplotlib.pyplot as plt  # type: ignore
 import numpy as np  # type: ignore
 
-from cloud_storage import downloadJson, getStorageClient, loadCredentialsFromAptJson
-from config import getAptJsonPath, getBucketName, getDatabaseObjectName
-from database import DatabaseManager
-from probability_sampler import analyze_prompt_lengths, get_distribution_curve, load_length_statistics
+try:
+    from cloud_storage import downloadJson, getStorageClient, loadCredentialsFromAptJson
+    from config import getAptJsonPath, getBucketName, getDatabaseObjectName
+    from database import DatabaseManager
+    from probability_sampler import analyze_prompt_lengths, get_distribution_curve, load_length_statistics
+except ImportError as e:
+    st.error(f"Import Error: {e}")
+    st.error("This might be due to missing dependencies or module loading issues.")
+    st.stop()
 
 
 # -----------------------------
