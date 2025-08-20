@@ -8,40 +8,39 @@ from google.cloud import storage  # type: ignore
 
 
 def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
-    """Load Google service account credentials from a local JSON file or Streamlit secrets.
+    """Load Google service account credentials from local file or Streamlit GCS connection.
 
     Args:
         aptJsonPath: Absolute or project-relative path to APT.json.
-                 If empty string, tries to load from Streamlit secrets.
+                 If empty string, tries to use Streamlit GCS connection.
 
     Returns:
         Google Auth credentials object.
     """
-    # Try to load from Streamlit secrets first (for cloud deployment)
+    # Try to use Streamlit GCS connection first (for cloud deployment)
     try:
         import streamlit as st
-        if hasattr(st, 'secrets') and 'google_cloud' in st.secrets:
-            import json
-            credentials_raw = st.secrets['google_cloud']['credentials']
-            print(f"DEBUG: Raw credentials type: {type(credentials_raw)}")
-            print(f"DEBUG: Raw credentials length: {len(str(credentials_raw))}")
-
-            if isinstance(credentials_raw, str):
-                # Clean up the JSON string - remove extra whitespace and potential control characters
-                cleaned_json = credentials_raw.strip()
-                # Remove potential BOM or invisible characters
-                cleaned_json = cleaned_json.encode('utf-8').decode('utf-8-sig')
-                print(f"DEBUG: First 200 chars of cleaned JSON: {cleaned_json[:200]}")
-                credentials_dict = json.loads(cleaned_json)
-            else:
-                credentials_dict = credentials_raw
-
-            print("DEBUG: Loading credentials from Streamlit secrets")
+        if hasattr(st, 'secrets') and 'connections' in st.secrets and 'gcs' in st.secrets['connections']:
+            print("DEBUG: Using Streamlit GCS connection")
+            # Create credentials from the connection parameters
+            gcs_config = st.secrets['connections']['gcs']
+            credentials_dict = {
+                'type': gcs_config['type'],
+                'project_id': gcs_config['project_id'],
+                'private_key_id': gcs_config['private_key_id'],
+                'private_key': gcs_config['private_key'],
+                'client_email': gcs_config['client_email'],
+                'client_id': gcs_config['client_id'],
+                'auth_uri': gcs_config['auth_uri'],
+                'token_uri': gcs_config['token_uri'],
+                'auth_provider_x509_cert_url': gcs_config['auth_provider_x509_cert_url'],
+                'client_x509_cert_url': gcs_config['client_x509_cert_url']
+            }
             return service_account.Credentials.from_service_account_info(credentials_dict)
         else:
-            print("DEBUG: Streamlit secrets not available or missing google_cloud section")
+            print("DEBUG: Streamlit GCS connection not available")
     except Exception as e:
-        print(f"DEBUG: Error loading from Streamlit secrets: {e}")
+        print(f"DEBUG: Error loading from Streamlit GCS connection: {e}")
         import traceback
         print(f"DEBUG: Full traceback: {traceback.format_exc()}")
 
