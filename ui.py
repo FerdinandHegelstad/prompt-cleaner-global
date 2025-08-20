@@ -4,6 +4,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -324,8 +325,26 @@ def main() -> None:
                     except Exception as e:
                         st.error(f"❌ Error running prefetch: {e}")
 
-            # Also try automatic prefetch (may not work in cloud)
-            triggerTopUpIfLow(targetCapacity=10)
+            # Automatic prefetch with better triggering
+            current_time = time.time()
+            last_check_key = "last_prefetch_check"
+
+            # Check if we should run prefetch (every 30 seconds or if no timestamp)
+            should_check = (
+                last_check_key not in st.session_state or
+                (current_time - st.session_state[last_check_key]) > 30
+            )
+
+            if should_check:
+                st.session_state[last_check_key] = current_time
+                triggerTopUpIfLow(targetCapacity=10)
+
+            # Show prefetch status
+            count = _countUserSelection()
+            if count < 7:
+                st.info(f"⚠️ Low on items ({count}/10) - Auto-population triggered")
+            else:
+                st.info(f"📦 Items ready: {count}")
         else:
             st.warning("Prefetching disabled due to Cloud DB unavailability.")
 
