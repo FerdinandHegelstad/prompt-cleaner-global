@@ -10,20 +10,26 @@ def getBucketName() -> str:
     Raises a RuntimeError if not set to avoid ambiguous defaults.
     """
     bucketName: Optional[str] = os.getenv("GCS_BUCKET")
+    print(f"DEBUG: GCS_BUCKET environment variable: {bucketName}")
 
     # Try to get from Streamlit secrets
     if not bucketName:
         try:
             import streamlit as st
-            if hasattr(st, 'secrets') and 'gcs' in st.secrets:
-                bucketName = st.secrets['gcs']['bucket_name']
-        except Exception:
-            pass
+            print(f"DEBUG: Streamlit secrets available: {hasattr(st, 'secrets')}")
+            if hasattr(st, 'secrets'):
+                print(f"DEBUG: Available secrets sections: {list(st.secrets.keys()) if st.secrets else 'No secrets'}")
+                if 'gcs' in st.secrets:
+                    bucketName = st.secrets['gcs']['bucket_name']
+                    print(f"DEBUG: Bucket name from secrets: {bucketName}")
+        except Exception as e:
+            print(f"DEBUG: Error loading from Streamlit secrets: {e}")
 
     if not bucketName:
         raise RuntimeError(
             "GCS_BUCKET environment variable is not set and bucket_name not found in Streamlit secrets. Set it to the name of your GCS bucket."
         )
+    print(f"DEBUG: Final bucket name: {bucketName}")
     return bucketName
 
 

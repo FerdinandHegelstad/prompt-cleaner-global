@@ -20,19 +20,23 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
     # Try to load from Streamlit secrets first (for cloud deployment)
     try:
         import streamlit as st
-        if not aptJsonPath and hasattr(st, 'secrets') and 'google_cloud' in st.secrets:
+        if hasattr(st, 'secrets') and 'google_cloud' in st.secrets:
             import json
             credentials_dict = st.secrets['google_cloud']['credentials']
             if isinstance(credentials_dict, str):
                 credentials_dict = json.loads(credentials_dict)
+            print("DEBUG: Loading credentials from Streamlit secrets")
             return service_account.Credentials.from_service_account_info(credentials_dict)
-    except Exception:
-        pass  # Fall back to file-based loading
+        else:
+            print("DEBUG: Streamlit secrets not available or missing google_cloud section")
+    except Exception as e:
+        print(f"DEBUG: Error loading from Streamlit secrets: {e}")
 
     # Fall back to file-based loading
     if not aptJsonPath:
         aptJsonPath = "APT.json"
 
+    print(f"DEBUG: Falling back to file-based loading from: {aptJsonPath}")
     return service_account.Credentials.from_service_account_file(aptJsonPath)
 
 
