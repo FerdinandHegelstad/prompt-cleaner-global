@@ -289,7 +289,30 @@ def main() -> None:
 
         # Only trigger prefetch if Cloud DB is available
         if "❌" not in cloud_db_status:
-            # Minimal control flow: auto top-up to capacity 10 (e.g., if 7 remain, fetch 3)
+            # Manual prefetch button for cloud environment
+            col_prefetch, _ = st.columns([2, 3])
+            with col_prefetch:
+                if st.button("🔄 Populate User Selection", use_container_width=True):
+                    try:
+                        # Run prefetcher manually
+                        import subprocess
+                        env = os.environ.copy()
+                        env['GCS_BUCKET'] = os.environ.get('GCS_BUCKET', 'unfiltered_database')
+
+                        result = subprocess.run([
+                            'python3', '-m', 'prefetcher', '5'
+                        ], cwd=os.path.dirname(__file__),
+                        env=env, capture_output=True, text=True, timeout=30)
+
+                        if result.returncode == 0:
+                            st.success("✅ Successfully populated User Selection!")
+                            st.rerun()
+                        else:
+                            st.error(f"❌ Prefetch failed: {result.stderr}")
+                    except Exception as e:
+                        st.error(f"❌ Error running prefetch: {e}")
+
+            # Also try automatic prefetch (may not work in cloud)
             triggerTopUpIfLow(targetCapacity=10)
         else:
             st.warning("Prefetching disabled due to Cloud DB unavailability.")
