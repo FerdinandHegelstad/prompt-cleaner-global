@@ -128,6 +128,47 @@ def _countUserSelection() -> int:
         return 0
 
 
+def _populate_user_selection_direct(targetCapacity: int = 10) -> None:
+    """Direct implementation of prefetcher logic without subprocess calls."""
+    import asyncio
+    import math
+    import time
+    from pathlib import Path
+    from database import DatabaseManager
+    from cloud_storage import downloadTextFile, getStorageClient, loadCredentialsFromAptJson
+    from config import getAptJsonPath, getBucketName, getRawStrippedObjectName
+    from workflow import Workflow
+
+    try:
+        # Get current count
+        db = DatabaseManager()
+        currentCount = asyncio.run(db.get_user_selection_count())
+
+        if currentCount >= targetCapacity:
+            return
+
+        deficit = targetCapacity - currentCount
+        x = max(deficit, int(math.ceil(deficit * 3.0)))  # multiplier of 3
+
+        # Check if raw_stripped.txt exists in GCS
+        bucket_name = getBucketName()
+        object_name = getRawStrippedObjectName()
+        apt_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_path)
+        client = getStorageClient(credentials)
+
+        content, _ = downloadTextFile(client, bucket_name, object_name)
+        if not content.strip():
+            return
+
+        # Run workflow directly
+        workflow = Workflow(object_name, x)
+        asyncio.run(workflow.run())
+
+    except Exception:
+        pass
+
+
 def triggerTopUpIfLow(targetCapacity: int = 10, threshold: int = 7) -> None:
     """If USER_SELECTION.json has fewer than `threshold` items, ensure a background
     prefetcher process is running to top up to `targetCapacity`.
@@ -140,28 +181,9 @@ def triggerTopUpIfLow(targetCapacity: int = 10, threshold: int = 7) -> None:
     if count >= threshold:
         return
 
-    # Fire-and-forget subprocess running the workflow to top up
-    prefetcherPath = paths["base"] / "prefetcher.py"
-    if not prefetcherPath.exists():
-        return
-
-    # If a prefetcher is already running (lock present), do nothing
-    if paths["lock"].exists():
-        return
-
+    # Direct function call instead of subprocess (works in cloud)
     try:
-        # Set environment variable for the subprocess
-        env = os.environ.copy()
-        env['GCS_BUCKET'] = os.environ.get('GCS_BUCKET', 'unfiltered_database')
-
-        subprocess.Popen(
-            [sys.executable, str(prefetcherPath), str(targetCapacity)],
-            cwd=str(paths["base"]),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
+        _populate_user_selection_direct(targetCapacity)
     except Exception:
         pass
 
@@ -295,20 +317,10 @@ def main() -> None:
             with col_prefetch:
                 if st.button("🔄 Populate User Selection", use_container_width=True):
                     try:
-                        # Run prefetcher manually
-                        env = os.environ.copy()
-                        env['GCS_BUCKET'] = os.environ.get('GCS_BUCKET', 'unfiltered_database')
-
-                        result = subprocess.run([
-                            'python3', 'prefetcher.py', '5'
-                        ], cwd=os.path.dirname(__file__),
-                        env=env, capture_output=True, text=True, timeout=30)
-
-                        if result.returncode == 0:
-                            st.success("✅ Successfully populated User Selection!")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Prefetch failed: {result.stderr}")
+                        # Run prefetcher directly (works in cloud)
+                        _populate_user_selection_direct(10)
+                        st.success("✅ Successfully populated User Selection!")
+                        st.rerun()
                     except Exception as e:
                         st.error(f"❌ Error running prefetch: {e}")
 
