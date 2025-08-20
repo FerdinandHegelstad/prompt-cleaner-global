@@ -1,0 +1,71 @@
+#!config.py
+import os
+from typing import Optional
+
+
+def getBucketName() -> str:
+    """Returns the Google Cloud Storage bucket name for the global database.
+
+    The value is read from the environment variable GCS_BUCKET or Streamlit secrets.
+    Raises a RuntimeError if not set to avoid ambiguous defaults.
+    """
+    bucketName: Optional[str] = os.getenv("GCS_BUCKET")
+
+    # Try to get from Streamlit secrets
+    if not bucketName:
+        try:
+            import streamlit as st
+            if hasattr(st, 'secrets') and 'gcs' in st.secrets:
+                bucketName = st.secrets['gcs']['bucket_name']
+        except Exception:
+            pass
+
+    if not bucketName:
+        raise RuntimeError(
+            "GCS_BUCKET environment variable is not set and bucket_name not found in Streamlit secrets. Set it to the name of your GCS bucket."
+        )
+    return bucketName
+
+
+def getDatabaseObjectName() -> str:
+    """Returns the object name for the global database JSON within the bucket.
+
+    Defaults to 'DATABASE.json' at the bucket root. Can be overridden via
+    the environment variable GCS_DATABASE_OBJECT.
+    """
+    objectName: Optional[str] = os.getenv("GCS_DATABASE_OBJECT")
+    return objectName or "DATABASE.json"
+
+
+def getAptJsonPath() -> str:
+    """Returns the file path to the service account JSON (APT.json).
+
+    Defaults to 'APT.json' in the project root. Can be overridden via
+    the environment variable APT_JSON_PATH.
+
+    For Streamlit Cloud, returns empty string when using secrets.
+    """
+    aptPath: Optional[str] = os.getenv("APT_JSON_PATH")
+    return aptPath or "APT.json"
+
+
+def getRawStrippedObjectName() -> str:
+    """Returns the object name for the raw_stripped.txt file within the bucket.
+
+    Defaults to 'raw_stripped.txt' at the bucket root. Can be overridden via
+    the environment variable GCS_RAW_STRIPPED_OBJECT.
+    """
+    objectName: Optional[str] = os.getenv("GCS_RAW_STRIPPED_OBJECT")
+    return objectName or "raw_stripped.txt"
+
+
+def getUserSelectionObjectName() -> str:
+    """Returns the object name for the USER_SELECTION.json file within the bucket.
+
+    Defaults to 'USER_SELECTION.json' at the bucket root. Can be overridden via
+    the environment variable GCS_USER_SELECTION_OBJECT.
+    """
+    objectName: Optional[str] = os.getenv("GCS_USER_SELECTION_OBJECT")
+    return objectName or "USER_SELECTION.json"
+
+
