@@ -298,130 +298,13 @@ def main() -> None:
     st.set_page_config(page_title="Prompt Cleaner UI", layout="wide")
     st.title("Prompt Cleaner")
 
-    tab_global, tab_user_selection = st.tabs([
-        "Global Database",
-        "User Selection"
+    tab_selection, tab_data = st.tabs([
+        "Selection",
+        "Data"
     ])
 
-    # --- Global Database Tab ---
-    with tab_global:
-        st.subheader("Global Database: Cleaned Entries")
-        st.caption("Loads from Google Cloud Storage only when you click Load.")
-
-
-
-        # Raw file info
-        try:
-            bucket_name = getBucketName()
-            object_name = getRawStrippedObjectName()
-            apt_json_path = getAptJsonPath()
-            credentials = loadCredentialsFromAptJson(apt_json_path)
-            client = getStorageClient(credentials)
-
-            content, generation = downloadTextFile(client, bucket_name, object_name)
-            if content:
-                lines = content.split('\n')
-                total_lines = len(lines)
-                non_empty_lines = len([ln for ln in lines if ln.strip()])
-                file_size = len(content)
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Raw File Lines", f"{total_lines:,}", help="Total lines in raw_stripped.txt")
-                with col2:
-                    st.metric("Non-empty Lines", f"{non_empty_lines:,}", help="Lines with content")
-                with col3:
-                    st.metric("File Size", f"{file_size:,} bytes", help="Size of raw_stripped.txt")
-            else:
-                st.metric("Raw File Status", "Empty or missing", help="raw_stripped.txt not found or empty")
-        except Exception as e:
-            st.metric("Raw File Status", "Error", help=f"Failed to load: {e}")
-
-        st.markdown("---")
-
-        colA, colB = st.columns([1, 6])
-        with colA:
-            load_global_clicked = st.button("Load Global Database", use_container_width=True)
-        if load_global_clicked:
-            try:
-                st.session_state.global_records = load_global_database()
-            except Exception as e:
-                st.error(f"Failed to load global database: {e}")
-
-        records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
-        if records is None:
-            st.info("Click 'Load Global Database' to view the global database.")
-        else:
-            df_editor = to_editor_dataframe(records)
-            if df_editor.empty:
-                st.info("No entries found in the global database.")
-            else:
-                total_items = len(records)
-                st.info(f"📊 **Total items in Global Database:** {total_items:,}")
-
-                edited_df = st.data_editor(
-                    df_editor,
-                    key="global_db_editor",
-                    use_container_width=True,
-                    height=600,
-                    num_rows="fixed",
-                    disabled=False,
-                    hide_index=True,
-                    column_config={
-                        "selected": st.column_config.CheckboxColumn(
-                            "selected",
-                            help="Check rows you want to delete",
-                            default=False,
-                        ),
-                        "cleaned": st.column_config.TextColumn(
-                            "cleaned",
-                            disabled=True,
-                        ),
-                    },
-                )
-
-                delete_col, _ = st.columns([1, 5])
-                with delete_col:
-                    delete_clicked = st.button(
-                        "Delete selected",
-                        type="secondary",
-                        use_container_width=True,
-                        disabled=bool(st.session_state.get("isWriting")),
-                    )
-
-                if delete_clicked:
-                    try:
-                        selected_mask = edited_df["selected"] == True  # noqa: E712
-                        selected_indices = edited_df[selected_mask].index.tolist()
-                        selected_normalized: List[str] = []
-                        for idx in selected_indices:
-                            if idx < len(records):
-                                norm_val = str(records[idx].get("normalized") or "").strip()
-                                if norm_val:
-                                    selected_normalized.append(norm_val)
-                    except Exception:
-                        selected_normalized = []
-
-                    if not selected_normalized:
-                        st.warning("No rows selected for deletion.")
-                    else:
-                        try:
-                            st.session_state.isWriting = True
-                            with st.spinner("Deleting from Cloud DB…"):
-                                db = DatabaseManager()
-                                removed = run_async(
-                                    db.remove_from_global_database_by_normalized(selected_normalized)
-                                )
-                            st.session_state.isWriting = False
-                            st.session_state.global_records = load_global_database()
-                            st.success(f"Deleted {removed} item(s) from the global database.")
-                            st.rerun()
-                        except Exception as e:
-                            st.session_state.isWriting = False
-                            st.error(f"Failed to delete selected rows: {str(e)}")
-
-    # --- User Selection Tab ---
-    with tab_user_selection:
+    # --- Selection Tab ---
+    with tab_selection:
         # User Selection Preview Section
         st.subheader("User Selection Preview")
         st.caption("Loads from Google Cloud Storage only when you click Load.")
@@ -569,6 +452,125 @@ def main() -> None:
 
                 # Force rerun to update UI
                 st.rerun()
+
+    # --- Data Tab ---
+    with tab_data:
+        st.subheader("Data: Cleaned Entries")
+        st.caption("Loads from Google Cloud Storage only when you click Load.")
+
+
+
+        # Raw file info
+        try:
+            bucket_name = getBucketName()
+            object_name = getRawStrippedObjectName()
+            apt_json_path = getAptJsonPath()
+            credentials = loadCredentialsFromAptJson(apt_json_path)
+            client = getStorageClient(credentials)
+
+            content, generation = downloadTextFile(client, bucket_name, object_name)
+            if content:
+                lines = content.split('\n')
+                total_lines = len(lines)
+                non_empty_lines = len([ln for ln in lines if ln.strip()])
+                file_size = len(content)
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Raw File Lines", f"{total_lines:,}", help="Total lines in raw_stripped.txt")
+                with col2:
+                    st.metric("Non-empty Lines", f"{non_empty_lines:,}", help="Lines with content")
+                with col3:
+                    st.metric("File Size", f"{file_size:,} bytes", help="Size of raw_stripped.txt")
+            else:
+                st.metric("Raw File Status", "Empty or missing", help="raw_stripped.txt not found or empty")
+        except Exception as e:
+            st.metric("Raw File Status", "Error", help=f"Failed to load: {e}")
+
+        st.markdown("---")
+
+        colA, colB = st.columns([1, 6])
+        with colA:
+            load_global_clicked = st.button("Load Global Database", use_container_width=True)
+        if load_global_clicked:
+            try:
+                st.session_state.global_records = load_global_database()
+            except Exception as e:
+                st.error(f"Failed to load global database: {e}")
+
+        records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
+        if records is None:
+            st.info("Click 'Load Global Database' to view the global database.")
+        else:
+            df_editor = to_editor_dataframe(records)
+            if df_editor.empty:
+                st.info("No entries found in the global database.")
+            else:
+                total_items = len(records)
+                st.info(f"📊 **Total items in Global Database:** {total_items:,}")
+
+                edited_df = st.data_editor(
+                    df_editor,
+                    key="global_db_editor",
+                    use_container_width=True,
+                    height=600,
+                    num_rows="fixed",
+                    disabled=False,
+                    hide_index=True,
+                    column_config={
+                        "selected": st.column_config.CheckboxColumn(
+                            "selected",
+                            help="Check rows you want to delete",
+                            default=False,
+                        ),
+                        "cleaned": st.column_config.TextColumn(
+                            "cleaned",
+                            disabled=True,
+                        ),
+                    },
+                )
+
+                delete_col, _ = st.columns([1, 5])
+                with delete_col:
+                    delete_clicked = st.button(
+                        "Delete selected",
+                        type="secondary",
+                        use_container_width=True,
+                        disabled=bool(st.session_state.get("isWriting")),
+                    )
+
+                if delete_clicked:
+                    try:
+                        selected_mask = edited_df["selected"] == True  # noqa: E712
+                        selected_indices = edited_df[selected_mask].index.tolist()
+                        selected_normalized: List[str] = []
+                        for idx in selected_indices:
+                            if idx < len(records):
+                                norm_val = str(records[idx].get("normalized") or "").strip()
+                                if norm_val:
+                                    selected_normalized.append(norm_val)
+                    except Exception:
+                        selected_normalized = []
+
+                    if not selected_normalized:
+                        st.warning("No rows selected for deletion.")
+                    else:
+                        try:
+                            st.session_state.isWriting = True
+                            with st.spinner("Deleting from Cloud DB…"):
+                                db = DatabaseManager()
+                                removed = run_async(
+                                    db.remove_from_global_database_by_normalized(selected_normalized)
+                                )
+                            st.session_state.isWriting = False
+                            st.session_state.global_records = load_global_database()
+                            st.success(f"Deleted {removed} item(s) from the global database.")
+                            st.rerun()
+                        except Exception as e:
+                            st.session_state.isWriting = False
+                            st.error(f"Failed to delete selected rows: {str(e)}")
+
+
 
 
 
