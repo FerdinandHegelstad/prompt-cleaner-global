@@ -187,7 +187,7 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
         items = []
 
         # Check if we can get user selection count
-        count = 0  # Initialize count to avoid unassigned variable error
+        count = 0
         try:
             count = run_async(db.userSelection.get_user_selection_count())
             print(f"DEBUG: Current queue count: {count}")
@@ -195,8 +195,8 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
             print(f"DEBUG: Error getting queue count: {count_error}")
 
         # If queue is below threshold, try to auto-populate it
-        target_queue_size = 50  # Target to populate up to
-        populate_threshold = 20  # Only populate when below this
+        target_queue_size = 50
+        populate_threshold = 20
         if count < populate_threshold:
             print(f"DEBUG: Queue below threshold ({count} < {populate_threshold}), calling auto_populate to reach {target_queue_size}")
             try:
@@ -206,18 +206,32 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
                 print(f"DEBUG: Error in auto_populate: {populate_error}")
 
         print(f"DEBUG: Attempting to fetch {batch_size} items")
-        for i in range(batch_size):
-            try:
-                item = run_async(db.pop_user_selection_item())
-                if item:
-                    items.append(item)
-                    print(f"DEBUG: Fetched item {i+1}: {item.get('cleaned', '')[:50]}...")
-                else:
-                    print(f"DEBUG: No more items available (got {len(items)} items)")
-                    break
-            except Exception as item_error:
-                print(f"DEBUG: Error fetching item {i+1}: {item_error}")
-                break
+        
+        # FIX: Fetch all items in a single async operation instead of multiple calls
+        try:
+            # Create a new async function to fetch multiple items
+            async def fetch_multiple_items():
+                fetched_items = []
+                for i in range(batch_size):
+                    try:
+                        item = await db.pop_user_selection_item()
+                        if item:
+                            fetched_items.append(item)
+                            print(f"DEBUG: Fetched item {i+1}: {item.get('cleaned', '')[:50]}...")
+                        else:
+                            print(f"DEBUG: No more items available (got {len(fetched_items)} items)")
+                            break
+                    except Exception as item_error:
+                        print(f"DEBUG: Error fetching item {i+1}: {item_error}")
+                        break
+                return fetched_items
+            
+            # Run the async function once
+            items = run_async(fetch_multiple_items())
+            
+        except Exception as fetch_error:
+            print(f"DEBUG: Error in fetch_multiple_items: {fetch_error}")
+            items = []
 
         print(f"DEBUG: Returning {len(items)} items")
         return items
