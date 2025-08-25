@@ -417,13 +417,19 @@ def main() -> None:
     with tab_data:
         # DEBUG: Data tab check
         st.info("📊 **DEBUG**: Data tab rendered successfully!")
+        st.info("🔘 **DEBUG**: About to create buttons...")
 
         # User Selection Preview Section
         st.subheader("User Selection")
 
         colA, colB = st.columns([1, 6])
         with colA:
+            st.info("🔘 **DEBUG**: Creating Load button...")
             load_user_clicked = st.button("Load", use_container_width=True)
+            st.info("✅ **DEBUG**: Load button created!")
+
+        with colB:
+            st.info("ℹ️ **DEBUG**: Right column ready")
         if load_user_clicked:
             with st.spinner("Loading user selection..."):
                 # DEBUG: Show configuration info directly in UI
@@ -491,9 +497,11 @@ def main() -> None:
         st.markdown("---")
 
         st.subheader("Global database")
+        st.info("🔘 **DEBUG**: About to create Global Database button...")
         colA, colB = st.columns([1, 6])
         with colA:
             load_global_clicked = st.button("Load Database", use_container_width=True)
+            st.info("✅ **DEBUG**: Load Database button created!")
         if load_global_clicked:
             with st.spinner("Loading global database..."):
                 # DEBUG: Show configuration info directly in UI
