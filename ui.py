@@ -237,6 +237,7 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
             count = run_async(db.userSelection.get_user_selection_count())
         except Exception as count_error:
             print(f"Error getting queue count: {count_error}")
+            # Don't raise - continue with count=0
 
         # Auto-populate if queue is low
         if count < 20:
@@ -244,9 +245,10 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
                 run_async(auto_populate_user_selection_if_needed())
             except Exception as populate_error:
                 print(f"Auto-populate error: {populate_error}")
+                # Don't raise - continue without populating
 
         # Fetch items
-        
+
         # FIX: Fetch all items in a single async operation instead of multiple calls
         try:
             # Create a new async function to fetch multiple items
@@ -260,16 +262,18 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
                         else:
                             break
                     except Exception as item_error:
-                        print(f"Fetch error: {item_error}")
+                        print(f"Fetch error for item {i}: {item_error}")
                         break
                 return fetched_items
-            
+
             # Run the async function once
             items = run_async(fetch_multiple_items())
-            
+
         except Exception as fetch_error:
             print(f"Fetch error: {fetch_error}")
             items = []
+            # Don't raise - return empty list to let UI handle it
+
         return items
     except Exception as e:
         print(f"Batch fetch error: {e}")
@@ -304,11 +308,17 @@ def main() -> None:
         # Fetch items if none exist
         if not st.session_state.batch_items:
             with st.spinner("Loading batch items..."):
-                items = fetch_batch_items(5)
-                if items:
-                    st.session_state.batch_items = items
-                    st.session_state.batch_id += 1  # Set initial batch_id
-                else:
+                try:
+                    items = fetch_batch_items(5)
+                    if items:
+                        st.session_state.batch_items = items
+                        st.session_state.batch_id += 1  # Set initial batch_id
+                    else:
+                        st.warning("No items found in user selection queue. The queue might be empty or there might be a configuration issue.")
+                        return
+                except Exception as e:
+                    st.error(f"Failed to load batch items: {str(e)}")
+                    st.info("This might be due to missing GCS credentials or configuration. Check your Streamlit Cloud secrets setup.")
                     return
 
         # Display batch items
@@ -376,14 +386,18 @@ def main() -> None:
         with colA:
             load_user_clicked = st.button("Load", use_container_width=True)
         if load_user_clicked:
-            try:
-                st.session_state.user_selection_records = load_user_selection()
-            except Exception as e:
-                st.error(f"Failed to load user selection: {e}")
+            with st.spinner("Loading user selection..."):
+                try:
+                    st.session_state.user_selection_records = load_user_selection()
+                    if not st.session_state.user_selection_records:
+                        st.warning("User selection queue is empty or couldn't be loaded. This might be due to GCS configuration issues.")
+                except Exception as e:
+                    st.error(f"Failed to load user selection: {str(e)}")
+                    st.info("Check your GCS credentials and bucket configuration in Streamlit Cloud secrets.")
 
         user_selection_records: Optional[List[Dict[str, Any]]] = st.session_state.get("user_selection_records")  # type: ignore
         if user_selection_records is None:
-            pass
+            st.info("Click 'Load' to view the user selection queue.")
         else:
             user_df = to_user_selection_dataframe(user_selection_records)
             if user_df.empty:
@@ -410,14 +424,18 @@ def main() -> None:
         with colA:
             load_global_clicked = st.button("Load Database", use_container_width=True)
         if load_global_clicked:
-            try:
-                st.session_state.global_records = load_global_database()
-            except Exception as e:
-                st.error(f"Failed to load global database: {e}")
+            with st.spinner("Loading global database..."):
+                try:
+                    st.session_state.global_records = load_global_database()
+                    if not st.session_state.global_records:
+                        st.warning("Global database is empty or couldn't be loaded. This might be due to GCS configuration issues.")
+                except Exception as e:
+                    st.error(f"Failed to load global database: {str(e)}")
+                    st.info("Check your GCS credentials and bucket configuration in Streamlit Cloud secrets.")
 
         records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
         if records is None:
-            pass
+            st.info("Click 'Load Database' to view the global database.")
         else:
             df_editor = to_editor_dataframe(records)
             if df_editor.empty:
