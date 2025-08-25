@@ -1,152 +1,101 @@
 #!config.py
+"""Configuration helpers for secrets.
+
+This module supports two secret sources:
+
+1. Local development via environment variables loaded from a `.env` file.
+2. Streamlit deployment via `st.secrets`.
+
+All other secret-loading paths have been removed to keep behaviour explicit.
+"""
+
 import os
 from typing import Optional
 
-# Load environment variables from .env file
 from dotenv import load_dotenv
+
 load_dotenv()
 
 
+def _st_secrets() -> dict:
+    """Safely return Streamlit secrets or an empty dict."""
+    try:
+        import streamlit as st  # type: ignore
+
+        return st.secrets
+    except Exception:
+        return {}
+
+
 def getBucketName() -> str:
-    """Returns the Google Cloud Storage bucket name for the global database.
+    """Get the Google Cloud Storage bucket name.
 
-    The value is read from the environment variable GCS_BUCKET or Streamlit secrets.
-    Raises a RuntimeError if not set to avoid ambiguous defaults.
+    The value is read from the environment variable ``GCS_BUCKET`` or from
+    ``[environment].GCS_BUCKET`` in Streamlit secrets. If neither are provided
+    a ``RuntimeError`` is raised.
     """
+
     bucketName: Optional[str] = os.getenv("GCS_BUCKET")
-
-    # Try to get from Streamlit secrets (lazy loading)
     if not bucketName:
-        try:
-            # Import streamlit with proper error handling
-            try:
-                import streamlit as st  # type: ignore
-            except ImportError:
-                st = None
-
-            if st and hasattr(st, 'secrets'):
-                # Try environment section (professional format)
-                if 'environment' in st.secrets and 'GCS_BUCKET' in st.secrets['environment']:
-                    bucketName = st.secrets['environment']['GCS_BUCKET']
-                # Try gcs section as fallback
-                elif 'gcs' in st.secrets and 'bucket_name' in st.secrets['gcs']:
-                    bucketName = st.secrets['gcs']['bucket_name']
-                # Try direct GCS_BUCKET key
-                elif 'GCS_BUCKET' in st.secrets:
-                    bucketName = st.secrets['GCS_BUCKET']
-        except Exception:
-            pass
-
+        bucketName = _st_secrets().get("environment", {}).get("GCS_BUCKET")
     if not bucketName:
-        raise RuntimeError(
-            "GCS_BUCKET environment variable is not set and bucket_name not found in Streamlit secrets. Set it to the name of your GCS bucket."
-        )
+        raise RuntimeError("GCS_BUCKET not set in environment or Streamlit secrets")
     return bucketName
 
 
 def getDatabaseObjectName() -> str:
-    """Returns the object name for the global database JSON within the bucket.
-
-    Defaults to 'DATABASE.json' at the bucket root. Can be overridden via
-    the environment variable GCS_DATABASE_OBJECT.
-    """
+    """Return the GCS object name for the global database JSON."""
     objectName: Optional[str] = os.getenv("GCS_DATABASE_OBJECT")
     return objectName or "DATABASE.json"
 
 
 def getAptJsonPath() -> str:
-    """Returns the file path to the service account JSON (APT.json).
+    """Return the file path to the service account JSON (APT.json).
 
-    Defaults to 'APT.json' in the project root. Can be overridden via
-    the environment variable APT_JSON_PATH.
-
-    For Streamlit Cloud, returns empty string when using secrets.
+    ``APT_JSON_PATH`` is used verbatim if set. If omitted, ``APT.json`` in the
+    project root is used. Setting ``APT_JSON_PATH`` to an empty string signals
+    that credentials should be loaded exclusively from Streamlit secrets.
     """
-    aptPath: Optional[str] = os.getenv("APT_JSON_PATH")
-    return aptPath or "APT.json"
+
+    aptPath = os.getenv("APT_JSON_PATH")
+    if aptPath is None:
+        aptPath = _st_secrets().get("environment", {}).get("APT_JSON_PATH")
+    if aptPath is None:
+        return "APT.json"
+    return aptPath
 
 
 def getRawStrippedObjectName() -> str:
-    """Returns the object name for the raw_stripped.txt file within the bucket.
-
-    Defaults to 'raw_stripped.txt' at the bucket root. Can be overridden via
-    the environment variable GCS_RAW_STRIPPED_OBJECT.
-    """
+    """Return the object name for ``raw_stripped.txt`` within the bucket."""
     objectName: Optional[str] = os.getenv("GCS_RAW_STRIPPED_OBJECT")
     return objectName or "raw_stripped.txt"
 
 
 def getUserSelectionObjectName() -> str:
-    """Returns the object name for the USER_SELECTION.json file within the bucket.
-
-    Defaults to 'USER_SELECTION.json' at the bucket root. Can be overridden via
-    the environment variable GCS_USER_SELECTION_OBJECT.
-    """
+    """Return the object name for ``USER_SELECTION.json`` within the bucket."""
     objectName: Optional[str] = os.getenv("GCS_USER_SELECTION_OBJECT")
     return objectName or "USER_SELECTION.json"
 
 
-def _get_st_secrets():
-    """Helper to get Streamlit secrets safely."""
-    try:
-        import streamlit as st # type: ignore
-        return st.secrets
-    except Exception:
-        return {}
-
-def _get_nested(*path, default=None):
-    """Helper to safely get nested secrets values."""
-    s = _get_st_secrets()
-    try:
-        for p in path:
-            s = s[p]
-        return s
-    except Exception:
-        return default
-
-def _first(*vals):
-    """Return the first non-empty value from the list."""
-    for v in vals:
-        if v and str(v).strip():
-            return str(v).strip()
-    return None
-
 def getXaiApiKey() -> Optional[str]:
-    """Returns the xAI API key for Grok API.
+    """Return the xAI API key for Grok API."""
+    return os.getenv("XAI_API_KEY") or _st_secrets().get("xai", {}).get("XAI_API_KEY")
 
-    Reads from environment variable XAI_API_KEY or Streamlit secrets.
-    Supports both nested [xai] and flat keys.
-    Returns None if not found (app will work in fallback mode).
-    """
-    return _first(
-        _get_nested("xai", "XAI_API_KEY"),
-        _get_nested("xai", "api_key"),  # Legacy format
-        _get_nested("XAI_API_KEY"),
-        os.getenv("XAI_API_KEY")
-    )
 
 def getXaiBaseUrl() -> str:
-    """Returns the xAI base URL.
-
-    Defaults to 'https://api.x.ai/v1' if not found.
-    """
-    return _first(
-        _get_nested("xai", "BASE_URL"),
-        _get_nested("XAI_BASE_URL"),
-        os.getenv("XAI_BASE_URL"),
-        "https://api.x.ai/v1"
+    """Return the xAI base URL."""
+    return (
+        os.getenv("XAI_BASE_URL")
+        or _st_secrets().get("xai", {}).get("XAI_BASE_URL")
+        or "https://api.x.ai/v1"
     )
+
 
 def getXaiModel() -> str:
-    """Returns the xAI model name.
-
-    Defaults to 'grok-3-mini' if not found.
-    """
-    return _first(
-        _get_nested("xai", "MODEL"),
-        _get_nested("XAI_MODEL"),
-        os.getenv("XAI_MODEL"),
-        "grok-3-mini"
+    """Return the xAI model name."""
+    return (
+        os.getenv("XAI_MODEL")
+        or _st_secrets().get("xai", {}).get("XAI_MODEL")
+        or "grok-3-mini"
     )
-
 

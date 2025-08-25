@@ -8,73 +8,35 @@ from google.cloud import storage  # type: ignore
 
 
 def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
-    """Load Google service account credentials from local file or Streamlit GCS connection.
+    """Load Google service account credentials.
 
-    Args:
-        aptJsonPath: Absolute or project-relative path to APT.json.
-                 If empty string, tries to use Streamlit GCS connection.
-
-    Returns:
-        Google Auth credentials object.
+    Credentials are loaded from Streamlit secrets when available using the
+    ``[connections.gcs]`` block. If not running in Streamlit or the secrets are
+    missing, the path to ``APT.json`` is used instead. No other lookup methods
+    are supported.
     """
-    # Try to use Streamlit GCS connection first (for cloud deployment)
+
     try:
-        # Import streamlit with proper error handling
-        try:
-            import streamlit as st  # type: ignore
-        except ImportError:
-            st = None
+        import streamlit as st  # type: ignore
 
-        if st and hasattr(st, 'secrets'):
-            # Try professional Streamlit GCS connection format first
-            if 'connections' in st.secrets and 'gcs' in st.secrets['connections']:
-                gcs_config = st.secrets['connections']['gcs']
-                credentials_dict = {
-                    'type': gcs_config['type'],
-                    'project_id': gcs_config['project_id'],
-                    'private_key_id': gcs_config['private_key_id'],
-                    'private_key': gcs_config['private_key'],
-                    'client_email': gcs_config['client_email'],
-                    'client_id': gcs_config['client_id'],
-                    'auth_uri': gcs_config['auth_uri'],
-                    'token_uri': gcs_config['token_uri'],
-                    'auth_provider_x509_cert_url': gcs_config['auth_provider_x509_cert_url'],
-                    'client_x509_cert_url': gcs_config['client_x509_cert_url']
-                }
-                return service_account.Credentials.from_service_account_info(credentials_dict)
-
-            # Fallback: Try service account JSON stored as string in secrets
-            elif 'gcp_service_account' in st.secrets:
-                import json
-                try:
-                    credentials_dict = json.loads(st.secrets['gcp_service_account'])
-                    return service_account.Credentials.from_service_account_info(credentials_dict)
-                except (json.JSONDecodeError, ValueError) as e:
-                    print(f"DEBUG: Failed to parse gcp_service_account from secrets: {e}")
-
-            # Fallback: Try other common secret keys
-            elif 'google_cloud' in st.secrets and 'credentials' in st.secrets['google_cloud']:
-                import json
-                try:
-                    credentials_dict = json.loads(st.secrets['google_cloud']['credentials'])
-                    return service_account.Credentials.from_service_account_info(credentials_dict)
-                except (json.JSONDecodeError, ValueError) as e:
-                    print(f"DEBUG: Failed to parse google_cloud.credentials from secrets: {e}")
-
-            else:
-                print("DEBUG: No GCS connection format found in Streamlit secrets")
-        else:
-            print("DEBUG: Streamlit secrets not available")
-    except Exception as e:
-        print(f"DEBUG: Error loading from Streamlit secrets: {e}")
-        import traceback
-        print(f"DEBUG: Full traceback: {traceback.format_exc()}")
-
-    # Fall back to file-based loading
-    if not aptJsonPath:
-        aptJsonPath = "APT.json"
-
-    return service_account.Credentials.from_service_account_file(aptJsonPath)
+        gcs_config = st.secrets["connections"]["gcs"]
+        credentials_dict = {
+            "type": gcs_config["type"],
+            "project_id": gcs_config["project_id"],
+            "private_key_id": gcs_config["private_key_id"],
+            "private_key": gcs_config["private_key"],
+            "client_email": gcs_config["client_email"],
+            "client_id": gcs_config["client_id"],
+            "auth_uri": gcs_config["auth_uri"],
+            "token_uri": gcs_config["token_uri"],
+            "auth_provider_x509_cert_url": gcs_config["auth_provider_x509_cert_url"],
+            "client_x509_cert_url": gcs_config["client_x509_cert_url"],
+        }
+        return service_account.Credentials.from_service_account_info(credentials_dict)
+    except Exception:
+        if aptJsonPath:
+            return service_account.Credentials.from_service_account_file(aptJsonPath)
+        raise RuntimeError("GCS credentials not found in Streamlit secrets or APT.json")
 
 
 def getStorageClient(credentials: Credentials) -> storage.Client:
