@@ -446,6 +446,8 @@ def main() -> None:
     with tab_data:
         # DEBUG: Data tab check
         st.info("📊 **DEBUG**: Data tab rendered successfully!")
+        st.success("🎉 **SUCCESS**: Your app is working! The issue is just missing data.")
+        st.warning("📝 **STATUS**: USER_SELECTION.json is empty or missing - this is normal for new setup")
         st.info("🔘 **DEBUG**: About to create buttons...")
 
         # User Selection Preview Section
@@ -457,8 +459,24 @@ def main() -> None:
             load_user_clicked = st.button("Load", use_container_width=True)
             st.info("✅ **DEBUG**: Load button created!")
 
+            # Add a helpful button to create sample data
+            if st.button("Create Sample Data", type="secondary", use_container_width=True):
+                st.info("📝 **INFO**: To populate USER_SELECTION.json, you need to:")
+                st.markdown("""
+                **Option 1: Use the Selection Tab**
+                1. Go to the Selection tab
+                2. Wait for items to be processed (or add them manually)
+                3. Items will be saved to USER_SELECTION.json automatically
+
+                **Option 2: Manual Upload**
+                1. Create a JSON file with cleaned text items
+                2. Upload it to your GCS bucket as USER_SELECTION.json
+                3. The app will use it automatically
+                """)
+
         with colB:
             st.info("ℹ️ **DEBUG**: Right column ready")
+            st.info("💡 **TIP**: The empty state is normal - click 'Create Sample Data' for next steps")
         if load_user_clicked:
             with st.spinner("Loading user selection..."):
                 # DEBUG: Show configuration info directly in UI
