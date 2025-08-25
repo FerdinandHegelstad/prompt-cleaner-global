@@ -401,6 +401,22 @@ def main() -> None:
             load_user_clicked = st.button("Load", use_container_width=True)
         if load_user_clicked:
             with st.spinner("Loading user selection..."):
+                # DEBUG: Show configuration info directly in UI
+                st.info("🔍 **DEBUG INFO**: Checking GCS configuration...")
+                try:
+                    bucket_name = getBucketName()
+                    st.info(f"✅ Bucket name: {bucket_name}")
+                except Exception as config_error:
+                    st.error(f"❌ GCS_BUCKET configuration error: {str(config_error)}")
+                    st.stop()
+
+                try:
+                    credentials = loadCredentialsFromAptJson(getAptJsonPath())
+                    st.info("✅ Credentials loaded successfully")
+                except Exception as cred_error:
+                    st.error(f"❌ Credentials error: {str(cred_error)}")
+                    st.stop()
+
                 try:
                     st.session_state.user_selection_records = load_user_selection()
                     if not st.session_state.user_selection_records:
@@ -455,6 +471,22 @@ def main() -> None:
             load_global_clicked = st.button("Load Database", use_container_width=True)
         if load_global_clicked:
             with st.spinner("Loading global database..."):
+                # DEBUG: Show configuration info directly in UI
+                st.info("🔍 **DEBUG INFO**: Checking GCS configuration...")
+                try:
+                    bucket_name = getBucketName()
+                    st.info(f"✅ Bucket name: {bucket_name}")
+                except Exception as config_error:
+                    st.error(f"❌ GCS_BUCKET configuration error: {str(config_error)}")
+                    st.stop()
+
+                try:
+                    credentials = loadCredentialsFromAptJson(getAptJsonPath())
+                    st.info("✅ Credentials loaded successfully")
+                except Exception as cred_error:
+                    st.error(f"❌ Credentials error: {str(cred_error)}")
+                    st.stop()
+
                 try:
                     st.session_state.global_records = load_global_database()
                     if not st.session_state.global_records:
