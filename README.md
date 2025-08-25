@@ -17,10 +17,15 @@ A Streamlit application for cleaning and managing prompts with Google Cloud Stor
    pip install -r requirements.txt
    ```
 
-3. Set up Google Cloud credentials:
+3. Set up secrets for local development:
    - Create a service account in Google Cloud Console
-   - Download the JSON key file as `APT.json`
-   - Set environment variable: `export GCS_BUCKET=unfiltered_database`
+   - Download the JSON key file as `APT.json` and place it in the project root
+   - Create a `.env` file with:
+
+     ```env
+     GCS_BUCKET=unfiltered_database
+     XAI_API_KEY=your-xai-api-key
+     ```
 
 4. Run locally:
    ```bash
@@ -31,31 +36,36 @@ A Streamlit application for cleaning and managing prompts with Google Cloud Stor
 
 This app is configured for deployment on Streamlit Cloud:
 
-1. **Secrets Configuration**: Add your Google Cloud credentials to Streamlit Cloud secrets
-2. **Environment Variables**: Configure `GCS_BUCKET` in Streamlit Cloud settings
-3. **Automatic Deployment**: Connect your GitHub repository to Streamlit Cloud
+1. **Secrets Configuration**: Add the following to your Streamlit Cloud secrets
+2. **Automatic Deployment**: Connect your GitHub repository to Streamlit Cloud
 
-### Required Secrets (in Streamlit Cloud dashboard):
+### Example `secrets.toml` for Streamlit Cloud
 
 ```toml
-[google_cloud]
-credentials = """
-{
-  "type": "service_account",
-  "project_id": "your-project-id",
-  "private_key_id": "your-private-key-id",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----\n",
-  "client_email": "your-service-account@your-project.iam.gserviceaccount.com",
-  "client_id": "your-client-id",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
-}
+[connections.gcs]
+type = "service_account"
+project_id = "your-project-id"
+private_key_id = "your-private-key-id"
+private_key = """
+-----BEGIN PRIVATE KEY-----
+YOUR_PRIVATE_KEY_HERE
+-----END PRIVATE KEY-----
 """
+client_email = "your-service-account@your-project.iam.gserviceaccount.com"
+client_id = "your-client-id"
+auth_uri = "https://accounts.google.com/o/oauth2/auth"
+token_uri = "https://oauth2.googleapis.com/token"
+auth_provider_x509_cert_url = "https://www.googleapis.com/oauth2/v1/certs"
+client_x509_cert_url = "https://www.googleapis.com/robot/v1/metadata/x509/your-service-account%40your-project.iam.gserviceaccount.com"
 
-[gcs]
-bucket_name = "unfiltered_database"
+[environment]
+GCS_BUCKET = "unfiltered_database"
+APT_JSON_PATH = ""  # empty triggers use of the secrets above
+
+[xai]
+XAI_API_KEY = "your-xai-api-key"
+XAI_BASE_URL = "https://api.x.ai/v1"
+XAI_MODEL = "grok-3-mini"
 ```
 
 ## Architecture
