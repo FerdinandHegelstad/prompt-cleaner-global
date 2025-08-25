@@ -380,13 +380,7 @@ def main() -> None:
         # User Selection Preview Section
         st.subheader("User Selection")
 
-        colA, colB = st.columns([1, 6])
-        with colA:
-            load_user_clicked = st.button("Load", use_container_width=True)
-
-        with colB:
-            st.info("Click 'Load' to view the user selection queue.")
-
+        load_user_clicked = st.button("Load", use_container_width=True)
         if load_user_clicked:
             with st.spinner("Loading user selection..."):
                 try:
@@ -423,12 +417,8 @@ def main() -> None:
         st.markdown("---")
 
         st.subheader("Global database")
-        colA, colB = st.columns([1, 6])
-        with colA:
-            load_global_clicked = st.button("Load Database", use_container_width=True)
-
-        with colB:
-            st.info("Click 'Load Database' to view the global database.")
+        load_global_clicked = st.button("Load Database", use_container_width=True)
+        st.info("Click 'Load Database' to view the global database.")
 
         if load_global_clicked:
             with st.spinner("Loading global database..."):
@@ -462,14 +452,12 @@ def main() -> None:
                     hide_index=True,
                 )
 
-                delete_col, _ = st.columns([1, 5])
-                with delete_col:
-                    delete_clicked = st.button(
-                        "Delete selected",
-                        type="secondary",
-                        use_container_width=True,
-                        disabled=bool(st.session_state.get("isWriting")),
-                    )
+                delete_clicked = st.button(
+                    "Delete selected",
+                    type="secondary",
+                    use_container_width=True,
+                    disabled=bool(st.session_state.get("isWriting")),
+                )
 
                 if delete_clicked:
                     try:
