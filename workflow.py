@@ -144,16 +144,12 @@ class Workflow:
             Dictionary with success status and message.
         """
         try:
-            print(f"DEBUG: Processing item: {item.default[:50]}...")
-
             # Call LLM - this will either succeed or raise an exception
             cleaned = await call_llm(item.default)
-            print(f"DEBUG: LLM returned: '{cleaned[:100]}...'")
 
             # Post-process the LLM output to enforce one non-empty line
             cleaned = cleaned.strip()
             if not cleaned:
-                print(f"DEBUG: LLM returned empty result for: {item.default[:50]}...")
                 return {"success": False, "message": "LLM returned empty result"}
 
             # If multiple lines were returned, keep the first
@@ -167,36 +163,30 @@ class Workflow:
             item.cleaned = cleaned
             normalized = normalize(cleaned).strip()
             if not normalized:
-                print(f"DEBUG: Normalization resulted in empty string for: {cleaned[:50]}...")
                 return {"success": False, "message": "Normalization resulted in empty string"}
 
             item.normalized = normalized
-            print(f"DEBUG: Normalized to: {normalized[:50]}...")
 
             # Always check for duplicates against Cloud DB
             try:
                 exists = await self.db_manager.exists_in_database(item.normalized) # type: ignore
-                print(f"DEBUG: Item exists in database: {exists}")
             except Exception as e:
                 # Log but don't crash - continue with processing
-                print(f"DEBUG: Failed to check duplicates: {e}")
+                print(f"Duplicate check error: {e}")
                 exists = False
 
             if not exists:
                 # Add locally for user review only. The UI's Keep action will
                 # perform the append to the global database explicitly.
                 await self.db_manager.add_to_user_selection(item.to_dict())
-                print(f"DEBUG: Added item to user selection")
                 return {"success": True, "message": "Item processed and added to selection"}
             else:
-                # Still log that we found a duplicate
-                print(f"DEBUG: Skipping duplicate item: {item.normalized[:50]}...")
                 return {"success": True, "message": "Item skipped (duplicate)"}
 
         except Exception as e:
             # Log the error but continue processing other items
             error_msg = f"Error processing item '{item.default[:50]}...': {e}"
-            print(f"DEBUG: {error_msg}")
+            print(f"Workflow error: {error_msg}")
             return {"success": False, "message": error_msg}
 
 if __name__ == "__main__":

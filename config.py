@@ -2,6 +2,10 @@
 import os
 from typing import Optional
 
+# Load environment variables from .env file
+from dotenv import load_dotenv
+load_dotenv()
+
 
 def getBucketName() -> str:
     """Returns the Google Cloud Storage bucket name for the global database.
@@ -82,7 +86,7 @@ def getUserSelectionObjectName() -> str:
 def _get_st_secrets():
     """Helper to get Streamlit secrets safely."""
     try:
-        import streamlit as st
+        import streamlit as st # type: ignore
         return st.secrets
     except Exception:
         return {}

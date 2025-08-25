@@ -4,7 +4,7 @@ import os
 # Bootstrap secrets to environment variables at app start
 # This must happen before importing modules that read config at import time
 try:
-    import streamlit as st
+    import streamlit as st # type: ignore
     xai = st.secrets.get("xai", {})
     # Accept both nested [xai] and flat keys
     key   = xai.get("XAI_API_KEY") or st.secrets.get("XAI_API_KEY")
@@ -20,7 +20,6 @@ except Exception:
 
 import asyncio
 import json
-import time
 from typing import Any, Dict, List, Optional
 
 import pandas as pd  # type: ignore
@@ -149,14 +148,12 @@ def to_user_selection_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     return df if not df.empty else pd.DataFrame(columns=["cleaned", "normalized", "default"])
 
 
+
+
+
 # -----------------------------
 # User Selection helpers
 # -----------------------------
-
-
-
-
-
 
 
 def ensure_session_item_loaded() -> None:
@@ -230,32 +227,25 @@ async def auto_populate_user_selection_if_needed() -> None:
 
 def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
     """Fetch multiple items from USER_SELECTION for batch review."""
-    print(f"DEBUG: fetch_batch_items called with batch_size={batch_size}")
     try:
         db = get_cached_db_manager()
-        print("DEBUG: Got cached database manager")
         items = []
 
         # Check if we can get user selection count
         count = 0
         try:
             count = run_async(db.userSelection.get_user_selection_count())
-            print(f"DEBUG: Current queue count: {count}")
         except Exception as count_error:
-            print(f"DEBUG: Error getting queue count: {count_error}")
+            print(f"Error getting queue count: {count_error}")
 
-        # If queue is below threshold, try to auto-populate it
-        target_queue_size = 50
-        populate_threshold = 20
-        if count < populate_threshold:
-            print(f"DEBUG: Queue below threshold ({count} < {populate_threshold}), calling auto_populate to reach {target_queue_size}")
+        # Auto-populate if queue is low
+        if count < 20:
             try:
                 run_async(auto_populate_user_selection_if_needed())
-                print("DEBUG: auto_populate completed")
             except Exception as populate_error:
-                print(f"DEBUG: Error in auto_populate: {populate_error}")
+                print(f"Auto-populate error: {populate_error}")
 
-        print(f"DEBUG: Attempting to fetch {batch_size} items")
+        # Fetch items
         
         # FIX: Fetch all items in a single async operation instead of multiple calls
         try:
@@ -267,12 +257,10 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
                         item = await db.pop_user_selection_item()
                         if item:
                             fetched_items.append(item)
-                            print(f"DEBUG: Fetched item {i+1}: {item.get('cleaned', '')[:50]}...")
                         else:
-                            print(f"DEBUG: No more items available (got {len(fetched_items)} items)")
                             break
                     except Exception as item_error:
-                        print(f"DEBUG: Error fetching item {i+1}: {item_error}")
+                        print(f"Fetch error: {item_error}")
                         break
                 return fetched_items
             
@@ -280,13 +268,11 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
             items = run_async(fetch_multiple_items())
             
         except Exception as fetch_error:
-            print(f"DEBUG: Error in fetch_multiple_items: {fetch_error}")
+            print(f"Fetch error: {fetch_error}")
             items = []
-
-        print(f"DEBUG: Returning {len(items)} items")
         return items
     except Exception as e:
-        print(f"DEBUG: Exception in fetch_batch_items: {e}")
+        print(f"Batch fetch error: {e}")
         return []
 
 
@@ -305,61 +291,6 @@ def main() -> None:
 
     # --- Selection Tab ---
     with tab_selection:
-        # User Selection Preview Section
-        st.subheader("User Selection Preview")
-        st.caption("Loads from Google Cloud Storage only when you click Load.")
-
-        st.markdown("---")
-
-        colA, colB = st.columns([1, 6])
-        with colA:
-            load_user_clicked = st.button("Load User Selection", use_container_width=True)
-        if load_user_clicked:
-            try:
-                st.session_state.user_selection_records = load_user_selection()
-            except Exception as e:
-                st.error(f"Failed to load user selection: {e}")
-
-        user_selection_records: Optional[List[Dict[str, Any]]] = st.session_state.get("user_selection_records")  # type: ignore
-        if user_selection_records is None:
-            st.info("Click 'Load User Selection' to preview all items in the user selection queue.")
-        else:
-            user_df = to_user_selection_dataframe(user_selection_records)
-            if user_df.empty:
-                st.info("No items found in user selection queue.")
-            else:
-                total_user_items = len(user_selection_records)
-                st.info(f"📊 **Total items in User Selection Queue:** {total_user_items:,}")
-
-                # Display the dataframe with all columns
-                st.data_editor(
-                    user_df,
-                    key="user_selection_preview",
-                    use_container_width=True,
-                    height=min(600, max(200, total_user_items * 30)),  # Dynamic height
-                    num_rows="fixed",
-                    disabled=True,  # Read-only preview
-                    hide_index=True,
-                    column_config={
-                        "cleaned": st.column_config.TextColumn(
-                            "Cleaned Text",
-                            disabled=True,
-                            width="medium",
-                        ),
-                        "normalized": st.column_config.TextColumn(
-                            "Normalized",
-                            disabled=True,
-                            width="small",
-                        ),
-                        "default": st.column_config.TextColumn(
-                            "Original",
-                            disabled=True,
-                            width="large",
-                        ),
-                    },
-                )
-
-        st.markdown("---")
         st.subheader("Batch Review")
 
         # Initialize session state variables (completely local, no network calls)
@@ -372,16 +303,12 @@ def main() -> None:
 
         # Fetch items if none exist
         if not st.session_state.batch_items:
-            print("DEBUG: No batch items, calling fetch_batch_items")
             with st.spinner("Loading batch items..."):
                 items = fetch_batch_items(5)
-                print(f"DEBUG: Initial fetch returned {len(items) if items else 0} items")
                 if items:
                     st.session_state.batch_items = items
                     st.session_state.batch_id += 1  # Set initial batch_id
-                    print(f"DEBUG: Set initial batch items, batch_id: {st.session_state.batch_id}")
                 else:
-                    print("DEBUG: No initial items, returning")
                     return
 
         # Display batch items
@@ -406,14 +333,10 @@ def main() -> None:
 
             # Fetch next button
             if st.button("Fetch Next 5 Items (Keep rest)", use_container_width=True, type="primary"):
-                print("DEBUG: Fetch Next button clicked!")
-
                 # Process discards and keep only non-discarded items
                 if st.session_state.batch_items:
-                    print(f"DEBUG: Processing {len(st.session_state.batch_items)} items")
                     try:
                         db = get_cached_db_manager()
-                        print("DEBUG: Got database manager")
                         # Only keep items that are not marked for discard
                         kept_count = 0
                         for i, item in enumerate(st.session_state.batch_items):
@@ -423,75 +346,69 @@ def main() -> None:
                                 try:
                                     run_async(db.add_to_global_database(item))
                                     kept_count += 1
-                                    print(f"DEBUG: Kept item {i}")
                                 except Exception as e:
-                                    print(f"DEBUG: Failed to keep item {i}: {e}")
-                            else:
-                                print(f"DEBUG: Discarded item {i}")
+                                    print(f"Keep error: {e}")
                     except Exception as e:
-                        print(f"DEBUG: Database manager error: {e}")
+                        print(f"Database error: {e}")
 
                 # Clear and fetch new items
-                print("DEBUG: Clearing current batch")
                 st.session_state.batch_items = []
                 st.session_state.discard_actions.clear()
 
                 # Fetch new items
-                print("DEBUG: Fetching new items...")
                 try:
                     items = fetch_batch_items(5)
-                    print(f"DEBUG: fetch_batch_items returned {len(items) if items else 0} items")
                     if items:
                         st.session_state.batch_items = items
                         st.session_state.batch_id += 1  # Increment batch_id for unique checkbox keys
-                        print(f"DEBUG: Set new batch items with cleared discard actions, new batch_id: {st.session_state.batch_id}")
-                    else:
-                        print("DEBUG: No items returned from fetch_batch_items")
                 except Exception as e:
-                    print(f"DEBUG: Error fetching new items: {e}")
+                    print(f"Fetch error: {e}")
 
                 # Force rerun to update UI
                 st.rerun()
 
     # --- Data Tab ---
     with tab_data:
-        st.subheader("Data: Cleaned Entries")
-        st.caption("Loads from Google Cloud Storage only when you click Load.")
-
-
-
-        # Raw file info
-        try:
-            bucket_name = getBucketName()
-            object_name = getRawStrippedObjectName()
-            apt_json_path = getAptJsonPath()
-            credentials = loadCredentialsFromAptJson(apt_json_path)
-            client = getStorageClient(credentials)
-
-            content, generation = downloadTextFile(client, bucket_name, object_name)
-            if content:
-                lines = content.split('\n')
-                total_lines = len(lines)
-                non_empty_lines = len([ln for ln in lines if ln.strip()])
-                file_size = len(content)
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Raw File Lines", f"{total_lines:,}", help="Total lines in raw_stripped.txt")
-                with col2:
-                    st.metric("Non-empty Lines", f"{non_empty_lines:,}", help="Lines with content")
-                with col3:
-                    st.metric("File Size", f"{file_size:,} bytes", help="Size of raw_stripped.txt")
-            else:
-                st.metric("Raw File Status", "Empty or missing", help="raw_stripped.txt not found or empty")
-        except Exception as e:
-            st.metric("Raw File Status", "Error", help=f"Failed to load: {e}")
-
-        st.markdown("---")
+        # User Selection Preview Section
+        st.subheader("User Selection")
 
         colA, colB = st.columns([1, 6])
         with colA:
-            load_global_clicked = st.button("Load Global Database", use_container_width=True)
+            load_user_clicked = st.button("Load", use_container_width=True)
+        if load_user_clicked:
+            try:
+                st.session_state.user_selection_records = load_user_selection()
+            except Exception as e:
+                st.error(f"Failed to load user selection: {e}")
+
+        user_selection_records: Optional[List[Dict[str, Any]]] = st.session_state.get("user_selection_records")  # type: ignore
+        if user_selection_records is None:
+            pass
+        else:
+            user_df = to_user_selection_dataframe(user_selection_records)
+            if user_df.empty:
+                st.info("No items found in user selection queue.")
+            else:
+                total_user_items = len(user_selection_records)
+                st.info(f"**Total items in User Selection Queue:** {total_user_items:,}")
+
+                # Display the dataframe with all columns
+                st.data_editor(
+                    user_df,
+                    key="user_selection_preview",
+                    use_container_width=True,
+                    height=600,  # Fixed height
+                    num_rows="fixed",
+                    disabled=True,  # Read-only preview
+                    hide_index=True,
+                )
+
+        st.markdown("---")
+
+        st.subheader("Global database")
+        colA, colB = st.columns([1, 6])
+        with colA:
+            load_global_clicked = st.button("Load Database", use_container_width=True)
         if load_global_clicked:
             try:
                 st.session_state.global_records = load_global_database()
@@ -500,14 +417,14 @@ def main() -> None:
 
         records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
         if records is None:
-            st.info("Click 'Load Global Database' to view the global database.")
+            pass
         else:
             df_editor = to_editor_dataframe(records)
             if df_editor.empty:
                 st.info("No entries found in the global database.")
             else:
                 total_items = len(records)
-                st.info(f"📊 **Total items in Global Database:** {total_items:,}")
+                st.info(f" **Total items in Global Database:** {total_items:,}")
 
                 edited_df = st.data_editor(
                     df_editor,
@@ -517,17 +434,6 @@ def main() -> None:
                     num_rows="fixed",
                     disabled=False,
                     hide_index=True,
-                    column_config={
-                        "selected": st.column_config.CheckboxColumn(
-                            "selected",
-                            help="Check rows you want to delete",
-                            default=False,
-                        ),
-                        "cleaned": st.column_config.TextColumn(
-                            "cleaned",
-                            disabled=True,
-                        ),
-                    },
                 )
 
                 delete_col, _ = st.columns([1, 5])
@@ -569,10 +475,6 @@ def main() -> None:
                         except Exception as e:
                             st.session_state.isWriting = False
                             st.error(f"Failed to delete selected rows: {str(e)}")
-
-
-
-
 
 if __name__ == "__main__":
     main()

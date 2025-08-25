@@ -74,7 +74,6 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
     if not aptJsonPath:
         aptJsonPath = "APT.json"
 
-    print(f"DEBUG: Falling back to file-based loading from: {aptJsonPath}")
     return service_account.Credentials.from_service_account_file(aptJsonPath)
 
 
