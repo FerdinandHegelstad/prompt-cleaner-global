@@ -13,50 +13,34 @@ def getBucketName() -> str:
     The value is read from the environment variable GCS_BUCKET or Streamlit secrets.
     Raises a RuntimeError if not set to avoid ambiguous defaults.
     """
-    print("🔍 DEBUG config.py: getBucketName() called")
     bucketName: Optional[str] = os.getenv("GCS_BUCKET")
-    print(f"🔍 DEBUG config.py: GCS_BUCKET env var = {bucketName}")
 
     # Try to get from Streamlit secrets (lazy loading)
     if not bucketName:
-        print("🔍 DEBUG config.py: No env var, trying Streamlit secrets...")
         try:
             # Import streamlit with proper error handling
             try:
                 import streamlit as st  # type: ignore
-                print("🔍 DEBUG config.py: Streamlit imported successfully")
-            except ImportError as import_error:
-                print(f"❌ DEBUG config.py: Streamlit import failed: {import_error}")
+            except ImportError:
                 st = None
 
             if st and hasattr(st, 'secrets'):
-                print(f"🔍 DEBUG config.py: st.secrets available, keys: {list(st.secrets.keys()) if st.secrets else 'empty'}")
                 # Try environment section (professional format)
                 if 'environment' in st.secrets and 'GCS_BUCKET' in st.secrets['environment']:
                     bucketName = st.secrets['environment']['GCS_BUCKET']
-                    print(f"✅ DEBUG config.py: Found bucket in environment section: {bucketName}")
                 # Try gcs section as fallback
                 elif 'gcs' in st.secrets and 'bucket_name' in st.secrets['gcs']:
                     bucketName = st.secrets['gcs']['bucket_name']
-                    print(f"✅ DEBUG config.py: Found bucket in gcs section: {bucketName}")
                 # Try direct GCS_BUCKET key
                 elif 'GCS_BUCKET' in st.secrets:
                     bucketName = st.secrets['GCS_BUCKET']
-                    print(f"✅ DEBUG config.py: Found bucket in direct key: {bucketName}")
-                else:
-                    print("⚠️ DEBUG config.py: No GCS_BUCKET found in any secrets section")
-            else:
-                print("❌ DEBUG config.py: st.secrets not available or st is None")
-        except Exception as e:
-            print(f"❌ DEBUG config.py: Exception accessing Streamlit secrets: {e}")
+        except Exception:
+            pass
 
     if not bucketName:
-        print("❌ DEBUG config.py: No bucket name found, raising RuntimeError")
         raise RuntimeError(
             "GCS_BUCKET environment variable is not set and bucket_name not found in Streamlit secrets. Set it to the name of your GCS bucket."
         )
-
-    print(f"✅ DEBUG config.py: Returning bucket name: {bucketName}")
     return bucketName
 
 

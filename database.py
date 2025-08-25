@@ -40,46 +40,34 @@ class UserSelectionStore:
         self._initialized = True
 
     async def _load_json(self) -> List[Dict[str, Any]]:
-        print(f"🔍 DEBUG _load_json: Starting for {self._objectName}")
         if not self._initialized:
-            print("🔍 DEBUG _load_json: Not initialized, initializing...")
             await self.initialize()
-            print("🔍 DEBUG _load_json: Initialization completed")
         assert self._client is not None
         assert self._bucketName is not None
         assert self._objectName is not None
 
-        print(f"🔍 DEBUG _load_json: About to download from {self._bucketName}/{self._objectName}")
         try:
             # Download from GCS
             content, generation = downloadTextFile(self._client, self._bucketName, self._objectName)
             self._currentGeneration = generation
-            print(f"🔍 DEBUG _load_json: Downloaded content length: {len(content)}")
 
             if not content.strip():
-                print("🔍 DEBUG _load_json: Content is empty, returning []")
                 return []
 
             try:
                 data = json.loads(content)
-                print(f"🔍 DEBUG _load_json: Parsed JSON type: {type(data)}")
                 if not isinstance(data, list):
-                    print(f"🔍 DEBUG _load_json: Data is not a list: {type(data)}, returning []")
                     return []
-                print(f"🔍 DEBUG _load_json: Returning {len(data)} items")
                 return data
-            except Exception as json_error:
-                print(f"❌ DEBUG _load_json: JSON parsing error: {json_error}, returning []")
+            except Exception:
                 return []
         except Exception as e:
             # Handle 404 error - file doesn't exist, create empty file
             if "404" in str(e) or "No such object" in str(e):
-                print(f"🔍 DEBUG _load_json: {self._objectName} doesn't exist (404), creating empty file")
                 await self._save_json([])
                 return []
             else:
                 # Re-raise other errors
-                print(f"❌ DEBUG _load_json: Critical GCS error: {str(e)}")
                 raise
 
     async def _save_json(self, data: List[Dict[str, Any]]) -> None:
@@ -139,11 +127,8 @@ class UserSelectionStore:
 
     async def get_user_selection_count(self) -> int:
         """Get the count of items in user selection."""
-        print("🔍 DEBUG get_user_selection_count: Starting...")
         data = await self._load_json()
-        count = len(data)
-        print(f"🔍 DEBUG get_user_selection_count: Returning count = {count}")
-        return count
+        return len(data)
 
 
 

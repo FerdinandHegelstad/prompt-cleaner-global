@@ -26,18 +26,14 @@ import pandas as pd  # type: ignore
 import streamlit as st  # type: ignore
 
 # --- External modules (your project) ---
-print("DEBUG: Starting imports...")
+
 try:
-    print("DEBUG: Importing cloud_storage...")
     from cloud_storage import (
         downloadJson,
         downloadTextFile,
         getStorageClient,
         loadCredentialsFromAptJson,
     )
-    print("DEBUG: cloud_storage imported successfully")
-
-    print("DEBUG: Importing config...")
     from config import (
         getAptJsonPath,
         getBucketName,
@@ -45,20 +41,9 @@ try:
         getRawStrippedObjectName,
         getUserSelectionObjectName,
     )
-    print("DEBUG: config imported successfully")
-
-    print("DEBUG: Importing database...")
     from database import DatabaseManager
-    print("DEBUG: database imported successfully")
-
-    print("DEBUG: Importing workflow...")
     from workflow import Workflow
-    print("DEBUG: workflow imported successfully")
-
-    print("DEBUG: All imports completed successfully!")
 except ImportError as e:
-    print(f"DEBUG: Import Error: {e}")
-    import streamlit as st
     st.error(f"Import Error: {e}")
     st.error("Missing dependencies or module import failure. Make sure project files are deployed.")
     st.stop()
@@ -98,11 +83,9 @@ def load_global_database() -> List[Dict[str, Any]]:
         client = getStorageClient(credentials)
         data, _generation = downloadJson(client, bucket_name, object_name)
         if not isinstance(data, list):
-            print(f"DEBUG: DATABASE.json content is not a list: {type(data)}")
             return []
         return data
     except Exception as e:
-        print(f"DEBUG: Failed to load global database: {str(e)}")
         raise Exception(f"Database Access Error: {str(e)}")
 
 
@@ -120,26 +103,21 @@ def load_user_selection() -> List[Dict[str, Any]]:
             content, _generation = downloadTextFile(client, bucket_name, object_name)
 
             if not content.strip():
-                print(f"DEBUG: USER_SELECTION.json is empty or has no content")
                 return []
 
             try:
                 data = json.loads(content)
                 if not isinstance(data, list):
-                    print(f"DEBUG: USER_SELECTION.json content is not a list: {type(data)}")
                     return []
                 return data
-            except json.JSONDecodeError as json_error:
-                print(f"DEBUG: Failed to parse USER_SELECTION.json: {json_error}")
+            except json.JSONDecodeError:
                 return []
         except Exception as e:
             # Handle 404 error - file doesn't exist
             if "404" in str(e) or "No such object" in str(e):
-                print("DEBUG: USER_SELECTION.json doesn't exist yet, returning empty list")
                 return []
             else:
                 # Re-raise other errors to show them in UI
-                print(f"DEBUG: GCS access error: {str(e)}")
                 raise Exception(f"GCS Access Error: {str(e)}")
 
     except Exception as e:
@@ -202,10 +180,7 @@ def ensure_session_item_loaded() -> None:
 @st.cache_resource
 def get_cached_db_manager():
     """Cache the database manager to avoid recreation."""
-    print("🔍 DEBUG get_cached_db_manager: Creating DatabaseManager...")
-    db = DatabaseManager()
-    print("🔍 DEBUG get_cached_db_manager: DatabaseManager created successfully")
-    return db
+    return DatabaseManager()
 
 
 
@@ -260,72 +235,46 @@ async def auto_populate_user_selection_if_needed() -> None:
 
 def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
     """Fetch multiple items from USER_SELECTION for batch review."""
-    print(f"🔍 DEBUG fetch_batch_items: Starting with batch_size={batch_size}")
     try:
-        print("🔍 DEBUG fetch_batch_items: Getting cached db manager...")
         db = get_cached_db_manager()
-        print("🔍 DEBUG fetch_batch_items: Got db manager successfully")
         items = []
 
         # Check if we can get user selection count
         count = 0
-        print("🔍 DEBUG fetch_batch_items: Checking user selection count...")
         try:
             count = run_async(db.userSelection.get_user_selection_count())
-            print(f"🔍 DEBUG fetch_batch_items: User selection count = {count}")
-        except Exception as count_error:
-            print(f"❌ DEBUG fetch_batch_items: Error getting queue count: {count_error}")
-            # Don't raise - continue with count=0
+        except Exception:
+            pass
 
         # Auto-populate if queue is low
         if count < 20:
-            print(f"🔍 DEBUG fetch_batch_items: Count {count} < 20, attempting auto-populate...")
             try:
                 run_async(auto_populate_user_selection_if_needed())
-                print("🔍 DEBUG fetch_batch_items: Auto-populate completed")
-            except Exception as populate_error:
-                print(f"❌ DEBUG fetch_batch_items: Auto-populate error: {populate_error}")
-                # Don't raise - continue without populating
+            except Exception:
+                pass
 
         # Fetch items
-        print(f"🔍 DEBUG fetch_batch_items: Starting to fetch {batch_size} items...")
-
-        # FIX: Fetch all items in a single async operation instead of multiple calls
         try:
-            # Create a new async function to fetch multiple items
             async def fetch_multiple_items():
                 fetched_items = []
-                print(f"🔍 DEBUG fetch_multiple_items: Starting async fetch for {batch_size} items")
                 for i in range(batch_size):
-                    print(f"🔍 DEBUG fetch_multiple_items: Fetching item {i+1}/{batch_size}")
                     try:
                         item = await db.pop_user_selection_item()
                         if item:
-                            print(f"✅ DEBUG fetch_multiple_items: Got item {i+1}: {type(item)}")
                             fetched_items.append(item)
                         else:
-                            print(f"⚠️ DEBUG fetch_multiple_items: No more items at position {i+1}, stopping")
                             break
-                    except Exception as item_error:
-                        print(f"❌ DEBUG fetch_multiple_items: Error fetching item {i}: {item_error}")
+                    except Exception:
                         break
-                print(f"🔍 DEBUG fetch_multiple_items: Returning {len(fetched_items)} items")
                 return fetched_items
 
-            # Run the async function once
-            print("🔍 DEBUG fetch_batch_items: Running async fetch...")
             items = run_async(fetch_multiple_items())
-            print(f"🔍 DEBUG fetch_batch_items: Async fetch completed, got {len(items)} items")
 
-        except Exception as fetch_error:
-            print(f"❌ DEBUG fetch_batch_items: Fetch error: {fetch_error}")
+        except Exception:
             items = []
-            # Don't raise - return empty list to let UI handle it
 
-        print(f"🔍 DEBUG fetch_batch_items: Returning {len(items)} items")
         return items
-    except Exception as e:
-        print(f"❌ DEBUG fetch_batch_items: Critical error: {e}")
+    except Exception:
         return []
 
 
@@ -334,19 +283,13 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
 # -----------------------------
 
 def main() -> None:
-    # DEBUG: Basic startup check
-    st.info("🚀 **DEBUG**: App started successfully!")
-
     st.set_page_config(page_title="Prompt Cleaner UI", layout="wide")
     st.title("Prompt Cleaner")
 
-    # DEBUG: Tab creation check
-    st.info("📑 **DEBUG**: Creating tabs...")
     tab_selection, tab_data = st.tabs([
         "Selection",
         "Data"
     ])
-    st.info("✅ **DEBUG**: Tabs created successfully!")
 
     # --- Selection Tab ---
     with tab_selection:
@@ -362,26 +305,16 @@ def main() -> None:
 
         # Fetch items if none exist
         if not st.session_state.batch_items:
-            st.info("🔄 **DEBUG**: Batch items empty, starting fetch process...")
             with st.spinner("Loading batch items..."):
-                st.info("⏳ **DEBUG**: Inside spinner, about to call fetch_batch_items(5)...")
                 try:
-                    st.info("📡 **DEBUG**: Calling fetch_batch_items(5)...")
                     items = fetch_batch_items(5)
-                    st.info(f"📦 **DEBUG**: fetch_batch_items returned: {type(items)} with length: {len(items) if items else 0}")
-
                     if items:
-                        st.info(f"✅ **DEBUG**: Found {len(items)} items, storing in session state...")
                         st.session_state.batch_items = items
-                        st.session_state.batch_id += 1  # Set initial batch_id
-                        st.success(f"✅ **DEBUG**: Successfully loaded {len(items)} batch items!")
+                        st.session_state.batch_id += 1
                     else:
                         st.warning("No items found in user selection queue. The queue might be empty or there might be a configuration issue.")
-                        st.error("🔍 **DEBUG**: fetch_batch_items returned empty list - this is the error point!")
-                        st.info("🔧 **DEBUG**: Check GCS configuration and USER_SELECTION.json file")
                         return
                 except Exception as e:
-                    st.error(f"❌ **DEBUG**: Exception in fetch_batch_items: {str(e)}")
                     st.error(f"Failed to load batch items: {str(e)}")
                     st.info("This might be due to missing GCS credentials or configuration. Check your Streamlit Cloud secrets setup.")
                     return
@@ -444,80 +377,26 @@ def main() -> None:
 
     # --- Data Tab ---
     with tab_data:
-        # DEBUG: Data tab check
-        st.info("📊 **DEBUG**: Data tab rendered successfully!")
-        st.success("🎉 **SUCCESS**: Your app is working! The issue is just missing data.")
-        st.warning("📝 **STATUS**: USER_SELECTION.json is empty or missing - this is normal for new setup")
-        st.info("🔘 **DEBUG**: About to create buttons...")
-
         # User Selection Preview Section
         st.subheader("User Selection")
 
         colA, colB = st.columns([1, 6])
         with colA:
-            st.info("🔘 **DEBUG**: Creating Load button...")
             load_user_clicked = st.button("Load", use_container_width=True)
-            st.info("✅ **DEBUG**: Load button created!")
-
-            # Add a helpful button to create sample data
-            if st.button("Create Sample Data", type="secondary", use_container_width=True):
-                st.info("📝 **INFO**: To populate USER_SELECTION.json, you need to:")
-                st.markdown("""
-                **Option 1: Use the Selection Tab**
-                1. Go to the Selection tab
-                2. Wait for items to be processed (or add them manually)
-                3. Items will be saved to USER_SELECTION.json automatically
-
-                **Option 2: Manual Upload**
-                1. Create a JSON file with cleaned text items
-                2. Upload it to your GCS bucket as USER_SELECTION.json
-                3. The app will use it automatically
-                """)
 
         with colB:
-            st.info("ℹ️ **DEBUG**: Right column ready")
-            st.info("💡 **TIP**: The empty state is normal - click 'Create Sample Data' for next steps")
+            st.info("Click 'Load' to view the user selection queue.")
+
         if load_user_clicked:
             with st.spinner("Loading user selection..."):
-                # DEBUG: Show configuration info directly in UI
-                st.info("🔍 **DEBUG INFO**: Checking GCS configuration...")
-                try:
-                    bucket_name = getBucketName()
-                    st.info(f"✅ Bucket name: {bucket_name}")
-                except Exception as config_error:
-                    st.error(f"❌ GCS_BUCKET configuration error: {str(config_error)}")
-                    st.stop()
-
-                try:
-                    credentials = loadCredentialsFromAptJson(getAptJsonPath())
-                    st.info("✅ Credentials loaded successfully")
-                except Exception as cred_error:
-                    st.error(f"❌ Credentials error: {str(cred_error)}")
-                    st.stop()
-
                 try:
                     st.session_state.user_selection_records = load_user_selection()
                     if not st.session_state.user_selection_records:
-                        st.warning("User selection queue is empty. The USER_SELECTION.json file either doesn't exist or contains no data.")
-                        st.info("This is normal if no items have been processed yet. Try running the Selection tab first to process some items.")
+                        st.info("No items found in user selection queue.")
                     else:
-                        st.success(f"Successfully loaded {len(st.session_state.user_selection_records)} items from user selection queue.")
+                        st.success(f"Loaded {len(st.session_state.user_selection_records)} items.")
                 except Exception as e:
-                    error_msg = str(e)
-                    st.error(f"Failed to load user selection: {error_msg}")
-
-                    # Provide specific guidance based on error type
-                    if "Configuration Error" in error_msg:
-                        st.error("❌ **Configuration Issue**: Check your Streamlit Cloud secrets setup")
-                        st.info("**Required secrets:** GCS_BUCKET, and either APT.json file or GCS service account credentials")
-                    elif "GCS Access Error" in error_msg:
-                        st.error("❌ **GCS Access Issue**: Your credentials may not have proper permissions")
-                        st.info("**Check:** Service account has 'Storage Object Viewer' permission on the bucket")
-                    elif "404" in error_msg or "No such object" in error_msg:
-                        st.warning("ℹ️ **File Not Found**: USER_SELECTION.json doesn't exist yet")
-                        st.info("**Solution:** Run the Selection tab first to create and populate the file")
-                    else:
-                        st.info("**General Fix:** Check your GCS credentials and bucket configuration in Streamlit Cloud secrets")
+                    st.error(f"Failed to load user selection: {str(e)}")
 
         user_selection_records: Optional[List[Dict[str, Any]]] = st.session_state.get("user_selection_records")  # type: ignore
         if user_selection_records is None:
@@ -544,52 +423,23 @@ def main() -> None:
         st.markdown("---")
 
         st.subheader("Global database")
-        st.info("🔘 **DEBUG**: About to create Global Database button...")
         colA, colB = st.columns([1, 6])
         with colA:
             load_global_clicked = st.button("Load Database", use_container_width=True)
-            st.info("✅ **DEBUG**: Load Database button created!")
+
+        with colB:
+            st.info("Click 'Load Database' to view the global database.")
+
         if load_global_clicked:
             with st.spinner("Loading global database..."):
-                # DEBUG: Show configuration info directly in UI
-                st.info("🔍 **DEBUG INFO**: Checking GCS configuration...")
-                try:
-                    bucket_name = getBucketName()
-                    st.info(f"✅ Bucket name: {bucket_name}")
-                except Exception as config_error:
-                    st.error(f"❌ GCS_BUCKET configuration error: {str(config_error)}")
-                    st.stop()
-
-                try:
-                    credentials = loadCredentialsFromAptJson(getAptJsonPath())
-                    st.info("✅ Credentials loaded successfully")
-                except Exception as cred_error:
-                    st.error(f"❌ Credentials error: {str(cred_error)}")
-                    st.stop()
-
                 try:
                     st.session_state.global_records = load_global_database()
                     if not st.session_state.global_records:
-                        st.warning("Global database is empty. The DATABASE.json file either doesn't exist or contains no approved items.")
-                        st.info("This is normal if no items have been approved yet. Use the Selection tab to review and approve items.")
+                        st.info("No entries found in the global database.")
                     else:
-                        st.success(f"Successfully loaded {len(st.session_state.global_records)} items from global database.")
+                        st.success(f"Loaded {len(st.session_state.global_records)} items.")
                 except Exception as e:
-                    error_msg = str(e)
-                    st.error(f"Failed to load global database: {error_msg}")
-
-                    # Provide specific guidance based on error type
-                    if "Configuration Error" in error_msg:
-                        st.error("❌ **Configuration Issue**: Check your Streamlit Cloud secrets setup")
-                        st.info("**Required secrets:** GCS_BUCKET, and either APT.json file or GCS service account credentials")
-                    elif "Database Access Error" in error_msg:
-                        st.error("❌ **GCS Access Issue**: Your credentials may not have proper permissions")
-                        st.info("**Check:** Service account has 'Storage Object Viewer' permission on the bucket")
-                    elif "404" in error_msg or "No such object" in error_msg:
-                        st.warning("ℹ️ **File Not Found**: DATABASE.json doesn't exist yet")
-                        st.info("**Solution:** Use the Selection tab to review and approve items, which will create the database")
-                    else:
-                        st.info("**General Fix:** Check your GCS credentials and bucket configuration in Streamlit Cloud secrets")
+                    st.error(f"Failed to load global database: {str(e)}")
 
         records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
         if records is None:
