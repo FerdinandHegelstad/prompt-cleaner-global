@@ -26,13 +26,18 @@ import pandas as pd  # type: ignore
 import streamlit as st  # type: ignore
 
 # --- External modules (your project) ---
+print("DEBUG: Starting imports...")
 try:
+    print("DEBUG: Importing cloud_storage...")
     from cloud_storage import (
         downloadJson,
         downloadTextFile,
         getStorageClient,
         loadCredentialsFromAptJson,
     )
+    print("DEBUG: cloud_storage imported successfully")
+
+    print("DEBUG: Importing config...")
     from config import (
         getAptJsonPath,
         getBucketName,
@@ -40,9 +45,20 @@ try:
         getRawStrippedObjectName,
         getUserSelectionObjectName,
     )
+    print("DEBUG: config imported successfully")
+
+    print("DEBUG: Importing database...")
     from database import DatabaseManager
+    print("DEBUG: database imported successfully")
+
+    print("DEBUG: Importing workflow...")
     from workflow import Workflow
+    print("DEBUG: workflow imported successfully")
+
+    print("DEBUG: All imports completed successfully!")
 except ImportError as e:
+    print(f"DEBUG: Import Error: {e}")
+    import streamlit as st
     st.error(f"Import Error: {e}")
     st.error("Missing dependencies or module import failure. Make sure project files are deployed.")
     st.stop()
@@ -299,13 +315,19 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
 # -----------------------------
 
 def main() -> None:
+    # DEBUG: Basic startup check
+    st.info("🚀 **DEBUG**: App started successfully!")
+
     st.set_page_config(page_title="Prompt Cleaner UI", layout="wide")
     st.title("Prompt Cleaner")
 
+    # DEBUG: Tab creation check
+    st.info("📑 **DEBUG**: Creating tabs...")
     tab_selection, tab_data = st.tabs([
         "Selection",
         "Data"
     ])
+    st.info("✅ **DEBUG**: Tabs created successfully!")
 
     # --- Selection Tab ---
     with tab_selection:
@@ -393,6 +415,9 @@ def main() -> None:
 
     # --- Data Tab ---
     with tab_data:
+        # DEBUG: Data tab check
+        st.info("📊 **DEBUG**: Data tab rendered successfully!")
+
         # User Selection Preview Section
         st.subheader("User Selection")
 
