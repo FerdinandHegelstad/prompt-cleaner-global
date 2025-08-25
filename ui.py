@@ -202,7 +202,10 @@ def ensure_session_item_loaded() -> None:
 @st.cache_resource
 def get_cached_db_manager():
     """Cache the database manager to avoid recreation."""
-    return DatabaseManager()
+    print("🔍 DEBUG get_cached_db_manager: Creating DatabaseManager...")
+    db = DatabaseManager()
+    print("🔍 DEBUG get_cached_db_manager: DatabaseManager created successfully")
+    return db
 
 
 
@@ -257,56 +260,72 @@ async def auto_populate_user_selection_if_needed() -> None:
 
 def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
     """Fetch multiple items from USER_SELECTION for batch review."""
+    print(f"🔍 DEBUG fetch_batch_items: Starting with batch_size={batch_size}")
     try:
+        print("🔍 DEBUG fetch_batch_items: Getting cached db manager...")
         db = get_cached_db_manager()
+        print("🔍 DEBUG fetch_batch_items: Got db manager successfully")
         items = []
 
         # Check if we can get user selection count
         count = 0
+        print("🔍 DEBUG fetch_batch_items: Checking user selection count...")
         try:
             count = run_async(db.userSelection.get_user_selection_count())
+            print(f"🔍 DEBUG fetch_batch_items: User selection count = {count}")
         except Exception as count_error:
-            print(f"Error getting queue count: {count_error}")
+            print(f"❌ DEBUG fetch_batch_items: Error getting queue count: {count_error}")
             # Don't raise - continue with count=0
 
         # Auto-populate if queue is low
         if count < 20:
+            print(f"🔍 DEBUG fetch_batch_items: Count {count} < 20, attempting auto-populate...")
             try:
                 run_async(auto_populate_user_selection_if_needed())
+                print("🔍 DEBUG fetch_batch_items: Auto-populate completed")
             except Exception as populate_error:
-                print(f"Auto-populate error: {populate_error}")
+                print(f"❌ DEBUG fetch_batch_items: Auto-populate error: {populate_error}")
                 # Don't raise - continue without populating
 
         # Fetch items
+        print(f"🔍 DEBUG fetch_batch_items: Starting to fetch {batch_size} items...")
 
         # FIX: Fetch all items in a single async operation instead of multiple calls
         try:
             # Create a new async function to fetch multiple items
             async def fetch_multiple_items():
                 fetched_items = []
+                print(f"🔍 DEBUG fetch_multiple_items: Starting async fetch for {batch_size} items")
                 for i in range(batch_size):
+                    print(f"🔍 DEBUG fetch_multiple_items: Fetching item {i+1}/{batch_size}")
                     try:
                         item = await db.pop_user_selection_item()
                         if item:
+                            print(f"✅ DEBUG fetch_multiple_items: Got item {i+1}: {type(item)}")
                             fetched_items.append(item)
                         else:
+                            print(f"⚠️ DEBUG fetch_multiple_items: No more items at position {i+1}, stopping")
                             break
                     except Exception as item_error:
-                        print(f"Fetch error for item {i}: {item_error}")
+                        print(f"❌ DEBUG fetch_multiple_items: Error fetching item {i}: {item_error}")
                         break
+                print(f"🔍 DEBUG fetch_multiple_items: Returning {len(fetched_items)} items")
                 return fetched_items
 
             # Run the async function once
+            print("🔍 DEBUG fetch_batch_items: Running async fetch...")
             items = run_async(fetch_multiple_items())
+            print(f"🔍 DEBUG fetch_batch_items: Async fetch completed, got {len(items)} items")
 
         except Exception as fetch_error:
-            print(f"Fetch error: {fetch_error}")
+            print(f"❌ DEBUG fetch_batch_items: Fetch error: {fetch_error}")
             items = []
             # Don't raise - return empty list to let UI handle it
 
+        print(f"🔍 DEBUG fetch_batch_items: Returning {len(items)} items")
         return items
     except Exception as e:
-        print(f"Batch fetch error: {e}")
+        print(f"❌ DEBUG fetch_batch_items: Critical error: {e}")
         return []
 
 
@@ -343,16 +362,26 @@ def main() -> None:
 
         # Fetch items if none exist
         if not st.session_state.batch_items:
+            st.info("🔄 **DEBUG**: Batch items empty, starting fetch process...")
             with st.spinner("Loading batch items..."):
+                st.info("⏳ **DEBUG**: Inside spinner, about to call fetch_batch_items(5)...")
                 try:
+                    st.info("📡 **DEBUG**: Calling fetch_batch_items(5)...")
                     items = fetch_batch_items(5)
+                    st.info(f"📦 **DEBUG**: fetch_batch_items returned: {type(items)} with length: {len(items) if items else 0}")
+
                     if items:
+                        st.info(f"✅ **DEBUG**: Found {len(items)} items, storing in session state...")
                         st.session_state.batch_items = items
                         st.session_state.batch_id += 1  # Set initial batch_id
+                        st.success(f"✅ **DEBUG**: Successfully loaded {len(items)} batch items!")
                     else:
                         st.warning("No items found in user selection queue. The queue might be empty or there might be a configuration issue.")
+                        st.error("🔍 **DEBUG**: fetch_batch_items returned empty list - this is the error point!")
+                        st.info("🔧 **DEBUG**: Check GCS configuration and USER_SELECTION.json file")
                         return
                 except Exception as e:
+                    st.error(f"❌ **DEBUG**: Exception in fetch_batch_items: {str(e)}")
                     st.error(f"Failed to load batch items: {str(e)}")
                     st.info("This might be due to missing GCS credentials or configuration. Check your Streamlit Cloud secrets setup.")
                     return
