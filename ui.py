@@ -74,47 +74,61 @@ def run_async(coro):
 # -----------------------------
 
 def load_global_database() -> List[Dict[str, Any]]:
-    bucket_name = getBucketName()
-    object_name = getDatabaseObjectName()
-    apt_json_path = getAptJsonPath()
-    credentials = loadCredentialsFromAptJson(apt_json_path)
-    client = getStorageClient(credentials)
-    data, _generation = downloadJson(client, bucket_name, object_name)
-    if not isinstance(data, list):
-        return []
-    return data
+    try:
+        bucket_name = getBucketName()
+        object_name = getDatabaseObjectName()
+        apt_json_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_json_path)
+        client = getStorageClient(credentials)
+        data, _generation = downloadJson(client, bucket_name, object_name)
+        if not isinstance(data, list):
+            print(f"DEBUG: DATABASE.json content is not a list: {type(data)}")
+            return []
+        return data
+    except Exception as e:
+        print(f"DEBUG: Failed to load global database: {str(e)}")
+        raise Exception(f"Database Access Error: {str(e)}")
 
 
 def load_user_selection() -> List[Dict[str, Any]]:
     """Load all user selection items from USER_SELECTION.json for preview."""
-    bucket_name = getBucketName()
-    object_name = getUserSelectionObjectName()
-    apt_json_path = getAptJsonPath()
-    credentials = loadCredentialsFromAptJson(apt_json_path)
-    client = getStorageClient(credentials)
-
     try:
-        # Use downloadTextFile since USER_SELECTION.json is stored as text
-        content, _generation = downloadTextFile(client, bucket_name, object_name)
-
-        if not content.strip():
-            return []
+        bucket_name = getBucketName()
+        object_name = getUserSelectionObjectName()
+        apt_json_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_json_path)
+        client = getStorageClient(credentials)
 
         try:
-            data = json.loads(content)
-            if not isinstance(data, list):
+            # Use downloadTextFile since USER_SELECTION.json is stored as text
+            content, _generation = downloadTextFile(client, bucket_name, object_name)
+
+            if not content.strip():
+                print(f"DEBUG: USER_SELECTION.json is empty or has no content")
                 return []
-            return data
-        except Exception:
-            return []
+
+            try:
+                data = json.loads(content)
+                if not isinstance(data, list):
+                    print(f"DEBUG: USER_SELECTION.json content is not a list: {type(data)}")
+                    return []
+                return data
+            except json.JSONDecodeError as json_error:
+                print(f"DEBUG: Failed to parse USER_SELECTION.json: {json_error}")
+                return []
+        except Exception as e:
+            # Handle 404 error - file doesn't exist
+            if "404" in str(e) or "No such object" in str(e):
+                print("DEBUG: USER_SELECTION.json doesn't exist yet, returning empty list")
+                return []
+            else:
+                # Re-raise other errors to show them in UI
+                print(f"DEBUG: GCS access error: {str(e)}")
+                raise Exception(f"GCS Access Error: {str(e)}")
+
     except Exception as e:
-        # Handle 404 error - file doesn't exist
-        if "404" in str(e) or "No such object" in str(e):
-            print("DEBUG: USER_SELECTION.json doesn't exist yet, returning empty list")
-            return []
-        else:
-            # Re-raise other errors
-            raise
+        # Re-raise configuration errors to show in UI
+        raise Exception(f"Configuration Error: {str(e)}")
 
 
 def to_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -390,10 +404,26 @@ def main() -> None:
                 try:
                     st.session_state.user_selection_records = load_user_selection()
                     if not st.session_state.user_selection_records:
-                        st.warning("User selection queue is empty or couldn't be loaded. This might be due to GCS configuration issues.")
+                        st.warning("User selection queue is empty. The USER_SELECTION.json file either doesn't exist or contains no data.")
+                        st.info("This is normal if no items have been processed yet. Try running the Selection tab first to process some items.")
+                    else:
+                        st.success(f"Successfully loaded {len(st.session_state.user_selection_records)} items from user selection queue.")
                 except Exception as e:
-                    st.error(f"Failed to load user selection: {str(e)}")
-                    st.info("Check your GCS credentials and bucket configuration in Streamlit Cloud secrets.")
+                    error_msg = str(e)
+                    st.error(f"Failed to load user selection: {error_msg}")
+
+                    # Provide specific guidance based on error type
+                    if "Configuration Error" in error_msg:
+                        st.error("❌ **Configuration Issue**: Check your Streamlit Cloud secrets setup")
+                        st.info("**Required secrets:** GCS_BUCKET, and either APT.json file or GCS service account credentials")
+                    elif "GCS Access Error" in error_msg:
+                        st.error("❌ **GCS Access Issue**: Your credentials may not have proper permissions")
+                        st.info("**Check:** Service account has 'Storage Object Viewer' permission on the bucket")
+                    elif "404" in error_msg or "No such object" in error_msg:
+                        st.warning("ℹ️ **File Not Found**: USER_SELECTION.json doesn't exist yet")
+                        st.info("**Solution:** Run the Selection tab first to create and populate the file")
+                    else:
+                        st.info("**General Fix:** Check your GCS credentials and bucket configuration in Streamlit Cloud secrets")
 
         user_selection_records: Optional[List[Dict[str, Any]]] = st.session_state.get("user_selection_records")  # type: ignore
         if user_selection_records is None:
@@ -428,10 +458,26 @@ def main() -> None:
                 try:
                     st.session_state.global_records = load_global_database()
                     if not st.session_state.global_records:
-                        st.warning("Global database is empty or couldn't be loaded. This might be due to GCS configuration issues.")
+                        st.warning("Global database is empty. The DATABASE.json file either doesn't exist or contains no approved items.")
+                        st.info("This is normal if no items have been approved yet. Use the Selection tab to review and approve items.")
+                    else:
+                        st.success(f"Successfully loaded {len(st.session_state.global_records)} items from global database.")
                 except Exception as e:
-                    st.error(f"Failed to load global database: {str(e)}")
-                    st.info("Check your GCS credentials and bucket configuration in Streamlit Cloud secrets.")
+                    error_msg = str(e)
+                    st.error(f"Failed to load global database: {error_msg}")
+
+                    # Provide specific guidance based on error type
+                    if "Configuration Error" in error_msg:
+                        st.error("❌ **Configuration Issue**: Check your Streamlit Cloud secrets setup")
+                        st.info("**Required secrets:** GCS_BUCKET, and either APT.json file or GCS service account credentials")
+                    elif "Database Access Error" in error_msg:
+                        st.error("❌ **GCS Access Issue**: Your credentials may not have proper permissions")
+                        st.info("**Check:** Service account has 'Storage Object Viewer' permission on the bucket")
+                    elif "404" in error_msg or "No such object" in error_msg:
+                        st.warning("ℹ️ **File Not Found**: DATABASE.json doesn't exist yet")
+                        st.info("**Solution:** Use the Selection tab to review and approve items, which will create the database")
+                    else:
+                        st.info("**General Fix:** Check your GCS credentials and bucket configuration in Streamlit Cloud secrets")
 
         records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
         if records is None:
