@@ -387,8 +387,6 @@ def main() -> None:
                     st.session_state.user_selection_records = load_user_selection()
                     if not st.session_state.user_selection_records:
                         st.info("No items found in user selection queue.")
-                    else:
-                        st.success(f"Loaded {len(st.session_state.user_selection_records)} items.")
                 except Exception as e:
                     st.error(f"Failed to load user selection: {str(e)}")
 
@@ -418,16 +416,12 @@ def main() -> None:
 
         st.subheader("Global database")
         load_global_clicked = st.button("Load Database", use_container_width=True)
-        st.info("Click 'Load Database' to view the global database.")
-
         if load_global_clicked:
             with st.spinner("Loading global database..."):
                 try:
                     st.session_state.global_records = load_global_database()
                     if not st.session_state.global_records:
                         st.info("No entries found in the global database.")
-                    else:
-                        st.success(f"Loaded {len(st.session_state.global_records)} items.")
                 except Exception as e:
                     st.error(f"Failed to load global database: {str(e)}")
 
@@ -452,12 +446,14 @@ def main() -> None:
                     hide_index=True,
                 )
 
-                delete_clicked = st.button(
-                    "Delete selected",
-                    type="secondary",
-                    use_container_width=True,
-                    disabled=bool(st.session_state.get("isWriting")),
-                )
+                delete_col, _ = st.columns([1, 5])
+                with delete_col:
+                    delete_clicked = st.button(
+                        "Delete selected",
+                        type="secondary",
+                        use_container_width=True,
+                        disabled=bool(st.session_state.get("isWriting")),
+                    )
 
                 if delete_clicked:
                     try:
