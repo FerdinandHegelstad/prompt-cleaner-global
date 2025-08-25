@@ -46,20 +46,30 @@ class UserSelectionStore:
         assert self._bucketName is not None
         assert self._objectName is not None
 
-        # Download from GCS
-        content, generation = downloadTextFile(self._client, self._bucketName, self._objectName)
-        self._currentGeneration = generation
-
-        if not content.strip():
-            return []
-
         try:
-            data = json.loads(content)
-            if not isinstance(data, list):
+            # Download from GCS
+            content, generation = downloadTextFile(self._client, self._bucketName, self._objectName)
+            self._currentGeneration = generation
+
+            if not content.strip():
                 return []
-            return data
-        except Exception:
-            return []
+
+            try:
+                data = json.loads(content)
+                if not isinstance(data, list):
+                    return []
+                return data
+            except Exception:
+                return []
+        except Exception as e:
+            # Handle 404 error - file doesn't exist, create empty file
+            if "404" in str(e) or "No such object" in str(e):
+                print(f"DEBUG: {self._objectName} doesn't exist, creating empty file")
+                await self._save_json([])
+                return []
+            else:
+                # Re-raise other errors
+                raise
 
     async def _save_json(self, data: List[Dict[str, Any]]) -> None:
         if not self._initialized:

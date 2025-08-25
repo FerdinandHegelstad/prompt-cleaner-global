@@ -19,6 +19,7 @@ except Exception:
     pass
 
 import asyncio
+import json
 import time
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +39,7 @@ try:
         getBucketName,
         getDatabaseObjectName,
         getRawStrippedObjectName,
+        getUserSelectionObjectName,
     )
     from database import DatabaseManager
     from workflow import Workflow
@@ -84,6 +86,38 @@ def load_global_database() -> List[Dict[str, Any]]:
     return data
 
 
+def load_user_selection() -> List[Dict[str, Any]]:
+    """Load all user selection items from USER_SELECTION.json for preview."""
+    bucket_name = getBucketName()
+    object_name = getUserSelectionObjectName()
+    apt_json_path = getAptJsonPath()
+    credentials = loadCredentialsFromAptJson(apt_json_path)
+    client = getStorageClient(credentials)
+
+    try:
+        # Use downloadTextFile since USER_SELECTION.json is stored as text
+        content, _generation = downloadTextFile(client, bucket_name, object_name)
+
+        if not content.strip():
+            return []
+
+        try:
+            data = json.loads(content)
+            if not isinstance(data, list):
+                return []
+            return data
+        except Exception:
+            return []
+    except Exception as e:
+        # Handle 404 error - file doesn't exist
+        if "404" in str(e) or "No such object" in str(e):
+            print("DEBUG: USER_SELECTION.json doesn't exist yet, returning empty list")
+            return []
+        else:
+            # Re-raise other errors
+            raise
+
+
 def to_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """Build a dataframe with a selectable column for editing/deletion.
 
@@ -97,6 +131,22 @@ def to_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
         })
     df = pd.DataFrame(rows)
     return df[["selected", "cleaned"]] if not df.empty else df
+
+
+def to_user_selection_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
+    """Build a dataframe for user selection preview.
+
+    Columns: cleaned, normalized, default (preview only, no selection)
+    """
+    rows: List[Dict[str, Any]] = []
+    for r in records:
+        rows.append({
+            "cleaned": str(r.get("cleaned") or "").strip(),
+            "normalized": str(r.get("normalized") or "").strip(),
+            "default": str(r.get("default") or "").strip(),
+        })
+    df = pd.DataFrame(rows)
+    return df if not df.empty else pd.DataFrame(columns=["cleaned", "normalized", "default"])
 
 
 # -----------------------------
@@ -291,8 +341,8 @@ def main() -> None:
 
         colA, colB = st.columns([1, 6])
         with colA:
-            load_clicked = st.button("Load", use_container_width=True)
-        if load_clicked:
+            load_global_clicked = st.button("Load Global Database", use_container_width=True)
+        if load_global_clicked:
             try:
                 st.session_state.global_records = load_global_database()
             except Exception as e:
@@ -300,7 +350,7 @@ def main() -> None:
 
         records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
         if records is None:
-            st.info("Click Load to view the global database.")
+            st.info("Click 'Load Global Database' to view the global database.")
         else:
             df_editor = to_editor_dataframe(records)
             if df_editor.empty:
@@ -372,6 +422,61 @@ def main() -> None:
 
     # --- User Selection Tab ---
     with tab_user_selection:
+        # User Selection Preview Section
+        st.subheader("User Selection Preview")
+        st.caption("Loads from Google Cloud Storage only when you click Load.")
+
+        st.markdown("---")
+
+        colA, colB = st.columns([1, 6])
+        with colA:
+            load_user_clicked = st.button("Load User Selection", use_container_width=True)
+        if load_user_clicked:
+            try:
+                st.session_state.user_selection_records = load_user_selection()
+            except Exception as e:
+                st.error(f"Failed to load user selection: {e}")
+
+        user_selection_records: Optional[List[Dict[str, Any]]] = st.session_state.get("user_selection_records")  # type: ignore
+        if user_selection_records is None:
+            st.info("Click 'Load User Selection' to preview all items in the user selection queue.")
+        else:
+            user_df = to_user_selection_dataframe(user_selection_records)
+            if user_df.empty:
+                st.info("No items found in user selection queue.")
+            else:
+                total_user_items = len(user_selection_records)
+                st.info(f"📊 **Total items in User Selection Queue:** {total_user_items:,}")
+
+                # Display the dataframe with all columns
+                st.data_editor(
+                    user_df,
+                    key="user_selection_preview",
+                    use_container_width=True,
+                    height=min(600, max(200, total_user_items * 30)),  # Dynamic height
+                    num_rows="fixed",
+                    disabled=True,  # Read-only preview
+                    hide_index=True,
+                    column_config={
+                        "cleaned": st.column_config.TextColumn(
+                            "Cleaned Text",
+                            disabled=True,
+                            width="medium",
+                        ),
+                        "normalized": st.column_config.TextColumn(
+                            "Normalized",
+                            disabled=True,
+                            width="small",
+                        ),
+                        "default": st.column_config.TextColumn(
+                            "Original",
+                            disabled=True,
+                            width="large",
+                        ),
+                    },
+                )
+
+        st.markdown("---")
         st.subheader("Batch Review")
 
         # Initialize session state variables (completely local, no network calls)
