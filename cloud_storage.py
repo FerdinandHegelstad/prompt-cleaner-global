@@ -18,6 +18,7 @@ def loadCredentialsFromAptJson(aptJsonPath: str) -> Credentials:
 
     try:
         import streamlit as st  # type: ignore
+        print("Loading credentials from Streamlit secrets")
 
         gcs_config = st.secrets["connections"]["gcs"]
         credentials_dict = {
