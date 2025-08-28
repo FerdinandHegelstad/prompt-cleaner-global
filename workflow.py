@@ -173,10 +173,10 @@ class Workflow:
             item.normalized = normalized
             print(f"DEBUG: Normalized to: {normalized[:50]}...")
 
-            # Always check for duplicates against Cloud DB
+            # Always check for duplicates against Cloud DB and discards
             try:
                 exists = await self.db_manager.exists_in_database(item.normalized) # type: ignore
-                print(f"DEBUG: Item exists in database: {exists}")
+                print(f"DEBUG: Item exists in database or discards: {exists}")
             except Exception as e:
                 # Log but don't crash - continue with processing
                 print(f"DEBUG: Failed to check duplicates: {e}")
@@ -189,9 +189,14 @@ class Workflow:
                 print(f"DEBUG: Added item to user selection")
                 return {"success": True, "message": "Item processed and added to selection"}
             else:
-                # Still log that we found a duplicate
-                print(f"DEBUG: Skipping duplicate item: {item.normalized[:50]}...")
-                return {"success": True, "message": "Item skipped (duplicate)"}
+                # Item is duplicate - increment occurrence count
+                try:
+                    await self.db_manager.increment_occurrence_count(item.normalized) # type: ignore
+                    print(f"DEBUG: Incremented occurrence count for duplicate item: {item.normalized[:50]}...")
+                    return {"success": True, "message": "Item skipped (duplicate, occurrence incremented)"}
+                except Exception as e:
+                    print(f"DEBUG: Failed to increment occurrence count: {e}")
+                    return {"success": True, "message": "Item skipped (duplicate)"}
 
         except Exception as e:
             # Log the error but continue processing other items

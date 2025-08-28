@@ -79,10 +79,20 @@ def getUserSelectionObjectName() -> str:
     return objectName or "USER_SELECTION.json"
 
 
+def getDiscardsObjectName() -> str:
+    """Returns the object name for the DISCARDS.json file within the bucket.
+
+    Defaults to 'DISCARDS.json' at the bucket root. Can be overridden via
+    the environment variable GCS_DISCARDS_OBJECT.
+    """
+    objectName: Optional[str] = os.getenv("GCS_DISCARDS_OBJECT")
+    return objectName or "DISCARDS.json"
+
+
 def _get_st_secrets():
     """Helper to get Streamlit secrets safely."""
     try:
-        import streamlit as st
+        import streamlit as st  # type: ignore
         return st.secrets
     except Exception:
         return {}

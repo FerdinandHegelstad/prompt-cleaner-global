@@ -38,6 +38,8 @@ try:
         getBucketName,
         getDatabaseObjectName,
         getRawStrippedObjectName,
+        getUserSelectionObjectName,
+        getDiscardsObjectName,
     )
     from database import DatabaseManager
     from workflow import Workflow
@@ -72,31 +74,64 @@ def run_async(coro):
 # Global Database (GCS-backed)
 # -----------------------------
 
-def load_global_database() -> List[Dict[str, Any]]:
-    bucket_name = getBucketName()
-    object_name = getDatabaseObjectName()
-    apt_json_path = getAptJsonPath()
-    credentials = loadCredentialsFromAptJson(apt_json_path)
-    client = getStorageClient(credentials)
-    data, _generation = downloadJson(client, bucket_name, object_name)
-    if not isinstance(data, list):
+def load_json_from_storage(object_name: str) -> List[Dict[str, Any]]:
+    """Generic function to load JSON data from cloud storage."""
+    try:
+        bucket_name = getBucketName()
+        apt_json_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_json_path)
+        client = getStorageClient(credentials)
+        data, _generation = downloadJson(client, bucket_name, object_name)
+        if not isinstance(data, list):
+            return []
+        return data
+    except Exception:
         return []
-    return data
+
+def load_global_database() -> List[Dict[str, Any]]:
+    """Load global database from cloud storage."""
+    return load_json_from_storage(getDatabaseObjectName())
+
+def load_discards() -> List[Dict[str, Any]]:
+    """Load discards from cloud storage."""
+    return load_json_from_storage(getDiscardsObjectName())
+
+def load_user_selection() -> List[Dict[str, Any]]:
+    """Load user selection from cloud storage."""
+    return load_json_from_storage(getUserSelectionObjectName())
+
+def get_raw_file_count() -> tuple[int, str]:
+    """Get raw file line count and status message."""
+    try:
+        bucket_name = getBucketName()
+        object_name = getRawStrippedObjectName()
+        apt_json_path = getAptJsonPath()
+        credentials = loadCredentialsFromAptJson(apt_json_path)
+        client = getStorageClient(credentials)
+        content, _ = downloadTextFile(client, bucket_name, object_name)
+        if content:
+            lines = content.split('\n')
+            return len(lines), f"{len(lines):,}"
+        else:
+            return 0, "Empty or missing"
+    except Exception as e:
+        return 0, "Error"
 
 
 def to_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
     """Build a dataframe with a selectable column for editing/deletion.
 
-    Columns: selected (bool), cleaned
+    Columns: selected (bool), cleaned, occurrences
     """
     rows: List[Dict[str, Any]] = []
     for r in records:
         rows.append({
             "selected": False,
             "cleaned": str(r.get("cleaned") or "").strip(),
+            "occurrences": r.get("occurrences", 1),
         })
     df = pd.DataFrame(rows)
-    return df[["selected", "cleaned"]] if not df.empty else df
+    return df[["selected", "cleaned", "occurrences"]] if not df.empty else df
 
 
 # -----------------------------
@@ -232,59 +267,50 @@ def fetch_batch_items(batch_size: int = 5) -> List[Dict[str, Any]]:
 
 def main() -> None:
     st.set_page_config(page_title="Prompt Cleaner UI", layout="wide")
-    st.title("Prompt Cleaner")
+    st.title("FYL.LA prompt management")
 
     tab_global, tab_user_selection = st.tabs([
-        "Global Database",
-        "User Selection"
+        "Database",
+        "Selection"
     ])
 
     # --- Global Database Tab ---
     with tab_global:
-        st.subheader("Global Database: Cleaned Entries")
-        st.caption("Loads from Google Cloud Storage only when you click Load.")
+        # Metrics in 4 columns
+        raw_count, raw_status = get_raw_file_count()
+        
+        # Get cached counts or initialize
+        db_count = len(st.session_state.get("global_records", []))
+        discards_count = len(st.session_state.get("discards_records", []))
+        selection_count = len(st.session_state.get("user_selection_records", []))
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            st.metric("Unprocessed Lines", raw_status)
+        with col2:
+            st.metric("Items in Database", f"{db_count:,}")
+        with col3:
+            st.metric("Items in Discards", f"{discards_count:,}")
+        with col4:
+            st.metric("Items in User Selection", f"{selection_count:,}")
 
-
-
-        # Raw file info
-        try:
-            bucket_name = getBucketName()
-            object_name = getRawStrippedObjectName()
-            apt_json_path = getAptJsonPath()
-            credentials = loadCredentialsFromAptJson(apt_json_path)
-            client = getStorageClient(credentials)
-
-            content, generation = downloadTextFile(client, bucket_name, object_name)
-            if content:
-                lines = content.split('\n')
-                total_lines = len(lines)
-                non_empty_lines = len([ln for ln in lines if ln.strip()])
-                file_size = len(content)
-
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("Raw File Lines", f"{total_lines:,}", help="Total lines in raw_stripped.txt")
-                with col2:
-                    st.metric("Non-empty Lines", f"{non_empty_lines:,}", help="Lines with content")
-                with col3:
-                    st.metric("File Size", f"{file_size:,} bytes", help="Size of raw_stripped.txt")
-            else:
-                st.metric("Raw File Status", "Empty or missing", help="raw_stripped.txt not found or empty")
-        except Exception as e:
-            st.metric("Raw File Status", "Error", help=f"Failed to load: {e}")
-
-        st.markdown("---")
-
-        colA, colB = st.columns([1, 6])
-        with colA:
-            load_clicked = st.button("Load", use_container_width=True)
+        # Load button
+        load_col, _ = st.columns([1, 6])
+        with load_col:
+            load_clicked = st.button("Load", width="stretch")
+        
         if load_clicked:
-            try:
-                st.session_state.global_records = load_global_database()
-            except Exception as e:
-                st.error(f"Failed to load global database: {e}")
+            with st.spinner("Loading all data..."):
+                try:
+                    st.session_state.global_records = load_global_database()
+                    st.session_state.discards_records = load_discards()
+                    st.session_state.user_selection_records = load_user_selection()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Failed to load data: {e}")
 
-        records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")  # type: ignore
+        # Database view
+        records: Optional[List[Dict[str, Any]]] = st.session_state.get("global_records")
         if records is None:
             st.info("Click Load to view the global database.")
         else:
@@ -292,13 +318,10 @@ def main() -> None:
             if df_editor.empty:
                 st.info("No entries found in the global database.")
             else:
-                total_items = len(records)
-                st.info(f"📊 **Total items in Global Database:** {total_items:,}")
-
                 edited_df = st.data_editor(
                     df_editor,
                     key="global_db_editor",
-                    use_container_width=True,
+                    width="stretch",
                     height=600,
                     num_rows="fixed",
                     disabled=False,
@@ -313,6 +336,11 @@ def main() -> None:
                             "cleaned",
                             disabled=True,
                         ),
+                        "occurrences": st.column_config.NumberColumn(
+                            "occurrences",
+                            disabled=True,
+                            help="Number of times this item has been encountered",
+                        ),
                     },
                 )
 
@@ -321,7 +349,7 @@ def main() -> None:
                     delete_clicked = st.button(
                         "Delete selected",
                         type="secondary",
-                        use_container_width=True,
+                        width="stretch",
                         disabled=bool(st.session_state.get("isWriting")),
                     )
 
@@ -355,6 +383,38 @@ def main() -> None:
                         except Exception as e:
                             st.session_state.isWriting = False
                             st.error(f"Failed to delete selected rows: {str(e)}")
+
+        # Discards table (read-only)
+        st.subheader("Discards")
+        discards_records: Optional[List[Dict[str, Any]]] = st.session_state.get("discards_records")
+        if discards_records is None:
+            st.info("Click Load to view discarded items.")
+        else:
+            if not discards_records:
+                st.info("No discarded items found.")
+            else:
+                # Create read-only dataframe for discards
+                discards_df = pd.DataFrame([
+                    {
+                        "cleaned": str(r.get("cleaned") or "").strip(),
+                        "occurrences": r.get("occurrences", 1),
+                    }
+                    for r in discards_records
+                ])
+                
+                st.dataframe(
+                    discards_df,
+                    width="stretch",
+                    height=400,
+                    hide_index=True,
+                    column_config={
+                        "cleaned": st.column_config.TextColumn("Cleaned Text"),
+                        "occurrences": st.column_config.NumberColumn(
+                            "Occurrences",
+                            help="Number of times this item was discarded"
+                        ),
+                    },
+                )
 
     # --- User Selection Tab ---
     with tab_user_selection:
@@ -403,7 +463,7 @@ def main() -> None:
                 st.markdown("---")
 
             # Fetch next button
-            if st.button("Fetch Next 5 Items (Keep rest)", use_container_width=True, type="primary"):
+            if st.button("Fetch Next 5 Items (Keep rest)", width="stretch", type="primary"):
                 print("DEBUG: Fetch Next button clicked!")
 
                 # Process discards and keep only non-discarded items
@@ -412,8 +472,9 @@ def main() -> None:
                     try:
                         db = get_cached_db_manager()
                         print("DEBUG: Got database manager")
-                        # Only keep items that are not marked for discard
+                        # Process items: keep non-discarded items, add discarded items to discards store
                         kept_count = 0
+                        discarded_count = 0
                         for i, item in enumerate(st.session_state.batch_items):
                             discard_key = f"discard_{i}"
                             if discard_key not in st.session_state.discard_actions:
@@ -425,7 +486,14 @@ def main() -> None:
                                 except Exception as e:
                                     print(f"DEBUG: Failed to keep item {i}: {e}")
                             else:
-                                print(f"DEBUG: Discarded item {i}")
+                                # Item discarded, add to discards store
+                                try:
+                                    run_async(db.add_to_discards(item))
+                                    discarded_count += 1
+                                    print(f"DEBUG: Added discarded item {i} to discards store")
+                                except Exception as e:
+                                    print(f"DEBUG: Failed to add discarded item {i} to discards store: {e}")
+                                    print(f"DEBUG: Discarded item {i}")
                     except Exception as e:
                         print(f"DEBUG: Database manager error: {e}")
 
