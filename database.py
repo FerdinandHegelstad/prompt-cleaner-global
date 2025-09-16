@@ -104,6 +104,9 @@ class UserSelectionStore:
         if not defaultVal or not cleanedVal or not normalizedVal:
             return
 
+        if not self._initialized:
+            await self.initialize()
+
         async with self._lock:
             data = await self._load_json()
 
@@ -123,7 +126,18 @@ class UserSelectionStore:
         data = await self._load_json()
         return len(data)
 
+    async def exists_in_user_selection(self, normalized: str) -> bool:
+        """Check if an item exists in user selection using dedup key matching."""
+        data = await self._load_json()
+        candidateKey = build_dedup_key(str(normalized or ''))
+        if not candidateKey:
+            return False
 
+        for existing in data:
+            existingNorm = str(existing.get('normalized') or '')
+            if build_dedup_key(existingNorm) == candidateKey:
+                return True
+        return False
 
     async def pop_user_selection_item(self) -> Optional[Dict[str, Any]]:
         """Remove and return one item from user selection."""
@@ -224,6 +238,9 @@ class DiscardedItemsStore:
         normalizedVal = (item.get('normalized') or '').strip()
         if not defaultVal or not cleanedVal or not normalizedVal:
             return
+
+        if not self._initialized:
+            await self.initialize()
 
         async with self._lock:
             data = await self._load_json()
@@ -517,10 +534,11 @@ class DatabaseManager:
         print("DEBUG: Created new db manager")
 
     async def exists_in_database(self, normalized: str) -> bool:
-        """Check if item exists in either global database or discards."""
+        """Check if item exists in global database, discards, or user selection."""
         exists_in_global = await self.globalStore.exists_in_database(normalized)
         exists_in_discards = await self.discardsStore.exists_in_discards(normalized)
-        return exists_in_global or exists_in_discards
+        exists_in_user_selection = await self.userSelection.exists_in_user_selection(normalized)
+        return exists_in_global or exists_in_discards or exists_in_user_selection
 
     async def add_to_user_selection(self, item: Dict[str, Any]) -> None:
         await self.userSelection.add_to_user_selection(item)

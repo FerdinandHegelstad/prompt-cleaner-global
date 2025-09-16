@@ -1,6 +1,6 @@
 #!analyse_item.py
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Dict, Optional, Union
 
 
 @dataclass
@@ -19,7 +19,7 @@ class Item:
     normalized: Optional[str] = None
     occurrences: int = 1
 
-    def to_dict(self) -> Dict[str, Optional[str | int]]:
+    def to_dict(self) -> Dict[str, Optional[Union[str, int]]]:
         """Convert the item to a dictionary for persistence.
 
         Returns a dictionary containing the original, cleaned, normalized
