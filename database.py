@@ -20,7 +20,7 @@ class UserSelectionStore:
     """Shared store for user selections in Google Cloud Storage."""
 
     def __init__(self) -> None:
-        self._lock = asyncio.Lock()
+        self._lock = None
         self._client = None
         self._bucketName: Optional[str] = None
         self._objectName: Optional[str] = None
@@ -32,12 +32,14 @@ class UserSelectionStore:
         if self._initialized:
             return
         # Resolve config lazily to allow local-only workflows without env set
+        self._lock = asyncio.Lock()
         self._bucketName = getBucketName()
         self._objectName = getUserSelectionObjectName()
         self._aptPath = getAptJsonPath()
         credentials = loadCredentialsFromAptJson(self._aptPath)
         self._client = getStorageClient(credentials)
         self._initialized = True
+        print("DEBUG: Initialized user selection store")
 
     async def _load_json(self) -> List[Dict[str, Any]]:
         if not self._initialized:
@@ -139,7 +141,7 @@ class DiscardedItemsStore:
     """Store for discarded items in Google Cloud Storage."""
 
     def __init__(self) -> None:
-        self._lock = asyncio.Lock()
+        self._lock = None
         self._client = None
         self._bucketName: Optional[str] = None
         self._objectName: Optional[str] = None
@@ -151,6 +153,7 @@ class DiscardedItemsStore:
         if self._initialized:
             return
         # Resolve config lazily to allow local-only workflows without env set
+        self._lock = asyncio.Lock()
         self._bucketName = getBucketName()
         self._objectName = getDiscardsObjectName()
         self._aptPath = getAptJsonPath()
@@ -504,9 +507,14 @@ class DatabaseManager:
     """High-level facade combining global DB, user selection store, and discards store."""
 
     def __init__(self) -> None:
+        print("DEBUG: Creating new db manager")
         self.userSelection = UserSelectionStore()
+        print("DEBUG: Created user selection store")
         self.globalStore = GlobalDatabaseStore()
+        print("DEBUG: Created global database store")
         self.discardsStore = DiscardedItemsStore()
+        print("DEBUG: Created discards store")
+        print("DEBUG: Created new db manager")
 
     async def exists_in_database(self, normalized: str) -> bool:
         """Check if item exists in either global database or discards."""

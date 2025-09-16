@@ -3,6 +3,8 @@
 import asyncio
 from typing import Any, Dict, List, Optional
 
+from pandas.core.frame import console
+
 from cloud_storage import (
     downloadJson,
     downloadTextFile,
@@ -24,14 +26,15 @@ from workflow import Workflow
 def run_async(coro):
     """Run an async coroutine safely from Streamlit."""
     try:
-        return asyncio.run(coro)
+        # Check if there's already a running loop
+        loop = asyncio.get_running_loop()
+        # If we're already in an async context, we need to create a task
+        import nest_asyncio
+        nest_asyncio.apply()
+        return loop.run_until_complete(coro)
     except RuntimeError:
-        loop = asyncio.new_event_loop()
-        try:
-            asyncio.set_event_loop(loop)
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+        # No running loop, safe to use asyncio.run
+        return asyncio.run(coro)
 
 
 class DataService:
@@ -103,8 +106,11 @@ class SelectionService:
     
     def get_cached_db_manager(self) -> DatabaseManager:
         """Cache the database manager to avoid recreation."""
+        print("DEBUG: Getting cached db manager")
         if self._cached_db is None:
+            print("DEBUG: Creating new db manager")
             self._cached_db = DatabaseManager()
+        print("DEBUG: Returning cached db manager")
         return self._cached_db
 
     async def auto_populate_user_selection_if_needed(self) -> None:
@@ -152,14 +158,19 @@ class SelectionService:
     def fetch_batch_items(self, batch_size: int = 5) -> List[Dict[str, Any]]:
         """Fetch multiple items from USER_SELECTION for batch review."""
         try:
+            print("DEBUG: Fetching batch items")
             db = self.get_cached_db_manager()
+            print("DEBUG: Got cached db manager")
             items = []
 
             # Check current queue count
             count = 0
+            print("DEBUG: Getting user selection count")
             try:
+                print("DEBUG: Running async get_user_selection_count")
                 count = run_async(db.userSelection.get_user_selection_count())
             except Exception:
+                print("DEBUG: Error getting user selection count")
                 pass
 
             # Auto-populate if below threshold
@@ -171,6 +182,7 @@ class SelectionService:
                 except Exception:
                     pass
 
+            print("DEBUG: Fetching items")
             # Fetch items
             for i in range(batch_size):
                 try:
