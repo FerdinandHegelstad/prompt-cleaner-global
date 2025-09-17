@@ -4,6 +4,8 @@
 import streamlit as st
 from ui.pages.database_tab import DatabaseTab
 from ui.pages.selection_tab import SelectionTab
+from ui.pages.input_tab import InputTab
+from ui.pages.parametrics_tab import ParametricsTab
 
 
 def main() -> None:
@@ -20,15 +22,23 @@ def main() -> None:
     # Create tab instances
     database_tab = DatabaseTab()
     selection_tab = SelectionTab()
+    input_tab = InputTab()
+    parametrics_tab = ParametricsTab()
 
     # Create tabs
-    tab1, tab2 = st.tabs(["Database", "Selection"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Database", "Selection", "Input", "Parametrics"])
 
     with tab1:
         database_tab.render()
 
     with tab2:
         selection_tab.render()
+
+    with tab3:
+        input_tab.render()
+
+    with tab4:
+        parametrics_tab.render()
 
 
 if __name__ == "__main__":

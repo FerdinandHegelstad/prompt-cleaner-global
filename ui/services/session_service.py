@@ -14,6 +14,7 @@ class SessionService:
             "db_count": len(st.session_state.get("global_records", [])),
             "discards_count": len(st.session_state.get("discards_records", [])),
             "selection_count": len(st.session_state.get("user_selection_records", [])),
+            "parametrics_count": len(st.session_state.get("parametrics_records", [])),
         }
     
     @staticmethod
@@ -31,6 +32,11 @@ class SessionService:
     def get_discards_records() -> Optional[List[Dict[str, Any]]]:
         """Get discards records from session."""
         return st.session_state.get("discards_records")
+    
+    @staticmethod
+    def get_parametrics_records() -> Optional[List[Dict[str, Any]]]:
+        """Get parametrics records from session."""
+        return st.session_state.get("parametrics_records")
     
     @staticmethod
     def is_writing() -> bool:

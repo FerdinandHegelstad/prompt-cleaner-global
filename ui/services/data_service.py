@@ -16,6 +16,7 @@ from config import (
     getBucketName,
     getDatabaseObjectName,
     getDiscardsObjectName,
+    getParametricsObjectName,
     getRawStrippedObjectName,
     getUserSelectionObjectName,
 )
@@ -71,6 +72,11 @@ class DataService:
         return DataService.load_json_from_storage(getUserSelectionObjectName())
 
     @staticmethod
+    def load_parametrics() -> List[Dict[str, Any]]:
+        """Load parametrics from cloud storage."""
+        return DataService.load_json_from_storage(getParametricsObjectName())
+
+    @staticmethod
     def get_raw_file_count() -> tuple[int, str]:
         """Get raw file line count and status message."""
         try:
@@ -95,6 +101,7 @@ class DataService:
             "global_records": DataService.load_global_database(),
             "discards_records": DataService.load_discards(),
             "user_selection_records": DataService.load_user_selection(),
+            "parametrics_records": DataService.load_parametrics(),
         }
 
 

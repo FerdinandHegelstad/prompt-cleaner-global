@@ -89,6 +89,16 @@ def getDiscardsObjectName() -> str:
     return objectName or "DISCARDS.json"
 
 
+def getParametricsObjectName() -> str:
+    """Returns the object name for the PARAMETRICS.json file within the bucket.
+
+    Defaults to 'PARAMETRICS.json' at the bucket root. Can be overridden via
+    the environment variable GCS_PARAMETRICS_OBJECT.
+    """
+    objectName: Optional[str] = os.getenv("GCS_PARAMETRICS_OBJECT")
+    return objectName or "PARAMETRICS.json"
+
+
 def _get_st_secrets():
     """Helper to get Streamlit secrets safely."""
     try:
