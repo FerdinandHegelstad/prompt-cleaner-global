@@ -41,7 +41,7 @@ class MetricsDisplay:
     @staticmethod
     def handle_load_action() -> bool:
         """Handle the load button action. Returns True if successful."""
-        with st.spinner("Loading all data..."):
+        with st.spinner("Loading all data"):
             try:
                 data = DataService.load_all_data()
                 SessionService.update_all_data(data)

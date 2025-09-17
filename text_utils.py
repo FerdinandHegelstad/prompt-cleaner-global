@@ -179,5 +179,5 @@ if __name__ == "__main__":
     else:
         print("Usage:")
         print("  python text_utils.py <input_file>                    # Strip dates (like stripper.py)")
-        print("  python text_utils.py <file.txt> <param1> <param2> ... # Remove lines (like remove_lines.py)")
+        print("  python text_utils.py <file.txt> <param1> <param2>  # Remove lines (like remove_lines.py)")
         sys.exit(1)

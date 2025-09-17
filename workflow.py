@@ -10,7 +10,6 @@ from database import DatabaseManager
 from analyse_item import Item
 from llm import call_llm
 from text_utils import normalize
-from probability_sampler import analyze_prompt_lengths, probabilistic_sample, load_length_statistics
 from cloud_storage import downloadTextFile, getStorageClient, loadCredentialsFromAptJson, uploadTextFile
 from config import getAptJsonPath, getBucketName, getRawStrippedObjectName
 
@@ -85,30 +84,8 @@ class Workflow:
             selected_items = items
             remaining = []
         else:
-            # Load or calculate length statistics
-            stats = load_length_statistics()
-            if not stats:
-                # Fallback: calculate statistics from in-memory content
-                lengths = [len(s) for s in items if s]
-                if lengths:
-                    import statistics
-                    stats = {
-                        'count': len(lengths),
-                        'mean': statistics.mean(lengths),
-                        'std': statistics.stdev(lengths) if len(lengths) > 1 else 1.0,
-                        'min': min(lengths),
-                        'max': max(lengths)
-                    }
-                else:
-                    stats = {'count': 0, 'mean': 1.0, 'std': 1.0, 'min': 0, 'max': 0}
-
-            # Use probability-based sampling
-            selected_items = probabilistic_sample(
-                items=items,
-                n=self.x,
-                mean=stats['mean'],
-                std=stats['std']
-            )
+            # Use simple random sampling
+            selected_items = random.sample(items, self.x)
 
             # Remove selected items from the original list
             remaining = [item for item in items if item not in selected_items]
@@ -144,16 +121,16 @@ class Workflow:
             Dictionary with success status and message.
         """
         try:
-            print(f"DEBUG: Processing item: {item.default[:50]}...")
+            print(f"DEBUG: Processing item: {item.default[:50]}", flush=True)
+            import sys
+            sys.stdout.flush()
 
             # Call LLM - this will either succeed or raise an exception
             cleaned = await call_llm(item.default)
-            print(f"DEBUG: LLM returned: '{cleaned[:100]}...'")
 
             # Post-process the LLM output to enforce one non-empty line
             cleaned = cleaned.strip()
             if not cleaned:
-                print(f"DEBUG: LLM returned empty result for: {item.default[:50]}...")
                 return {"success": False, "message": "LLM returned empty result"}
 
             # If multiple lines were returned, keep the first
@@ -167,41 +144,35 @@ class Workflow:
             item.cleaned = cleaned
             normalized = normalize(cleaned).strip()
             if not normalized:
-                print(f"DEBUG: Normalization resulted in empty string for: {cleaned[:50]}...")
                 return {"success": False, "message": "Normalization resulted in empty string"}
 
             item.normalized = normalized
-            print(f"DEBUG: Normalized to: {normalized[:50]}...")
 
             # Always check for duplicates against Cloud DB and discards
             try:
                 exists = await self.db_manager.exists_in_database(item.normalized) # type: ignore
-                print(f"DEBUG: Item exists in database or discards: {exists}")
             except Exception as e:
                 # Log but don't crash - continue with processing
-                print(f"DEBUG: Failed to check duplicates: {e}")
                 exists = False
 
             if not exists:
                 # Add locally for user review only. The UI's Keep action will
                 # perform the append to the global database explicitly.
                 await self.db_manager.add_to_user_selection(item.to_dict())
-                print(f"DEBUG: Added item to user selection")
                 return {"success": True, "message": "Item processed and added to selection"}
             else:
                 # Item is duplicate - increment occurrence count
                 try:
                     await self.db_manager.increment_occurrence_count(item.normalized) # type: ignore
-                    print(f"DEBUG: Incremented occurrence count for duplicate item: {item.normalized[:50]}...")
+                    print(f"⚠️  Prompt already exists: '{item.default[:80]}'")
                     return {"success": True, "message": "Item skipped (duplicate, occurrence incremented)"}
                 except Exception as e:
-                    print(f"DEBUG: Failed to increment occurrence count: {e}")
+                    print(f"⚠️  Prompt already exists: '{item.default[:80]}'")
                     return {"success": True, "message": "Item skipped (duplicate)"}
 
         except Exception as e:
             # Log the error but continue processing other items
-            error_msg = f"Error processing item '{item.default[:50]}...': {e}"
-            print(f"DEBUG: {error_msg}")
+            error_msg = f"Error processing item '{item.default[:50]}': {e}"
             return {"success": False, "message": error_msg}
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ class SelectionTab:
     
     def _load_initial_batch(self) -> None:
         """Load the initial batch of items."""
-        with self.ui_helpers.with_spinner("Loading batch items..."):
+        with self.ui_helpers.with_spinner("Loading batch items"):
             items = self.selection_service.fetch_batch_items(5)
             if items:
                 self.batch_session.set_batch_items(items)

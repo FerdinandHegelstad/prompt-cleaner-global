@@ -9,8 +9,8 @@ from ui.pages.selection_tab import SelectionTab
 def main() -> None:
     """Main Streamlit application entry point."""
     st.set_page_config(
-        page_title="Prompt Cleaner Global",
-        page_icon="🧹",
+        page_title="FYL.LA database manager",
+        page_icon="👨‍💻",
         layout="wide",
         initial_sidebar_state="expanded"
     )

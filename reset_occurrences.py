@@ -20,7 +20,7 @@ from config import getBucketName, getAptJsonPath, getDatabaseObjectName, getUser
 
 async def reset_global_database_occurrences():
     """Reset all occurrence counts to 1 in the global database."""
-    print("🔄 Resetting global database occurrences...")
+    print("🔄 Resetting global database occurrences")
 
     try:
         # Set up GCS client
@@ -41,7 +41,7 @@ async def reset_global_database_occurrences():
                 old_count = item['occurrences']
                 item['occurrences'] = 1
                 reset_count += 1
-                print(f"  Reset {item.get('default', 'N/A')[:30]}...: {old_count} → 1")
+                print(f"  Reset {item.get('default', 'N/A')[:30]}: {old_count} → 1")
 
         if reset_count > 0:
             # Upload updated data
@@ -56,7 +56,7 @@ async def reset_global_database_occurrences():
 
 async def reset_user_selection_occurrences():
     """Reset all occurrence counts to 1 in user selection."""
-    print("\n🔄 Resetting user selection occurrences...")
+    print("\n🔄 Resetting user selection occurrences")
 
     try:
         db_manager = DatabaseManager()
@@ -73,7 +73,7 @@ async def reset_user_selection_occurrences():
                 old_count = item['occurrences']
                 item['occurrences'] = 1
                 reset_count += 1
-                print(f"  Reset {item.get('default', 'N/A')[:30]}...: {old_count} → 1")
+                print(f"  Reset {item.get('default', 'N/A')[:30]}: {old_count} → 1")
 
         if reset_count > 0:
             # Save updated data
@@ -88,7 +88,7 @@ async def reset_user_selection_occurrences():
 
 async def reset_discards_occurrences():
     """Reset all occurrence counts to 1 in discards."""
-    print("\n🔄 Resetting discards occurrences...")
+    print("\n🔄 Resetting discards occurrences")
 
     try:
         db_manager = DatabaseManager()
@@ -105,7 +105,7 @@ async def reset_discards_occurrences():
                 old_count = item['occurrences']
                 item['occurrences'] = 1
                 reset_count += 1
-                print(f"  Reset {item.get('default', 'N/A')[:30]}...: {old_count} → 1")
+                print(f"  Reset {item.get('default', 'N/A')[:30]}: {old_count} → 1")
 
         if reset_count > 0:
             # Save updated data
@@ -120,7 +120,7 @@ async def reset_discards_occurrences():
 
 async def main():
     """Main function to reset all occurrence counts."""
-    print("🚀 Starting occurrence count reset...")
+    print("🚀 Starting occurrence count reset")
     print("This will set all occurrence counts to 1 in:")
     print("  - Global database")
     print("  - User selection")

@@ -106,11 +106,8 @@ class SelectionService:
     
     def get_cached_db_manager(self) -> DatabaseManager:
         """Cache the database manager to avoid recreation."""
-        print("DEBUG: Getting cached db manager")
         if self._cached_db is None:
-            print("DEBUG: Creating new db manager")
             self._cached_db = DatabaseManager()
-        print("DEBUG: Returning cached db manager")
         return self._cached_db
 
     async def auto_populate_user_selection_if_needed(self) -> None:
@@ -158,31 +155,31 @@ class SelectionService:
     def fetch_batch_items(self, batch_size: int = 5) -> List[Dict[str, Any]]:
         """Fetch multiple items from USER_SELECTION for batch review."""
         try:
-            print("DEBUG: Fetching batch items")
             db = self.get_cached_db_manager()
-            print("DEBUG: Got cached db manager")
             items = []
 
             # Check current queue count
             count = 0
-            print("DEBUG: Getting user selection count")
             try:
-                print("DEBUG: Running async get_user_selection_count")
                 count = run_async(db.userSelection.get_user_selection_count())
             except Exception:
-                print("DEBUG: Error getting user selection count")
                 pass
 
             # Auto-populate if below threshold
             target_queue_size = 50
             populate_threshold = 20
+            print(f"Queue count: {count}, threshold: {populate_threshold}")
             if count < populate_threshold:
+                print(f"Auto-populating user selection (queue too low: {count} < {populate_threshold})")
                 try:
-                    run_async(self.auto_populate_user_selection_if_needed())
-                except Exception:
-                    pass
+                    result = run_async(self.auto_populate_user_selection_if_needed())
+                    if result:
+                        print(f"✅ Workflow result: {result}")
+                except Exception as e:
+                    print(f"❌ Auto-populate failed: {e}")
+            else:
+                print(f"✅ Queue has enough items ({count} >= {populate_threshold}), no processing needed")
 
-            print("DEBUG: Fetching items")
             # Fetch items
             for i in range(batch_size):
                 try:

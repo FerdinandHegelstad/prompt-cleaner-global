@@ -1,4 +1,4 @@
-# Prompt Cleaner Global
+# Fyl.la database manager
 
 A Streamlit application for cleaning and managing prompts with Google Cloud Storage backend, supporting multi-user collaboration.
 
