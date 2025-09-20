@@ -85,7 +85,7 @@ class ParameterizationLLM:
             Dictionary with parametric data or None if failed
         """
         client = self._get_client()
-        model = "grok-4"  # Use grok-4 specifically for parameterization
+        model = "grok-4-fast-reasoning"  # Use grok-4-fast-reasoning specifically for parameterization
         last_exception = None
         
         for attempt in range(max_retries + 1):

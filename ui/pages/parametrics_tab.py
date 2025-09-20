@@ -105,6 +105,7 @@ class ParametricsComponents:
         with delete_col:
             return st.button(
                 "Delete selected",
+                key="parametrics_delete_button",
                 type="secondary",
                 use_container_width=True,
                 disabled=disabled,

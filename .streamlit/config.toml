@@ -17,3 +17,11 @@ serverPort = 8501
 
 # Enable server CORS to avoid the warning
 server.enableCORS = true
+
+[theme]
+base="dark"
+primaryColor="#6224F5"
+
+[theme]
+base="light"
+primaryColor="#29e0d6"

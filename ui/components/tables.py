@@ -85,6 +85,7 @@ class TableComponents:
         with delete_col:
             return st.button(
                 "Delete selected",
+                key="database_delete_button",
                 type="secondary",
                 width="stretch",
                 disabled=disabled,

@@ -153,13 +153,13 @@ def getXaiBaseUrl() -> str:
 def getXaiModel() -> str:
     """Returns the xAI model name.
 
-    Defaults to 'grok-3-mini' if not found.
+    Defaults to 'grok-4-fast-reasoning' if not found.
     """
     return _first(
         _get_nested("xai", "MODEL"),
         _get_nested("XAI_MODEL"),
         os.getenv("XAI_MODEL"),
-        "grok-3-mini"
+        "grok-4-fast-reasoning"
     )
 
 
