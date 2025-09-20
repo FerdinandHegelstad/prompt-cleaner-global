@@ -101,20 +101,44 @@ class InputTab:
                     client = getStorageClient(credentials)
                     bucket_name = getBucketName()
                     object_name = getRawStrippedObjectName()
-                    
+
                     current_content, generation = downloadTextFile(client, bucket_name, object_name)
-                    
-                    # Append new content
+
+                    # Split content into lines for duplicate checking
+                    existing_lines = set()
                     if current_content:
-                        updated_content = current_content + "\n" + stripped_content
+                        existing_lines = set(line.strip() for line in current_content.split('\n') if line.strip())
+
+                    # Split new content into lines and filter out duplicates
+                    new_lines_list = [line.strip() for line in stripped_content.split('\n') if line.strip()]
+                    unique_new_lines = [line for line in new_lines_list if line not in existing_lines]
+
+                    # Only add content if there are new unique lines
+                    if unique_new_lines:
+                        new_unique_content = '\n'.join(unique_new_lines)
+                        if current_content:
+                            updated_content = current_content + "\n" + new_unique_content
+                        else:
+                            updated_content = new_unique_content
+
+                        # Upload back to cloud
+                        uploadTextFile(client, bucket_name, object_name, updated_content, generation)
+
+                        # Count new lines added
+                        new_lines = len(unique_new_lines)
+                        duplicates_filtered = len(new_lines_list) - new_lines
+
+                        # After adding new content, apply remove lines logic if configured
+                        remove_stats = self._apply_remove_lines_logic_after_upload(client, bucket_name, object_name)
+
+                        # Show comprehensive success message
+                        self._show_comprehensive_upload_stats(new_lines, duplicates_filtered, remove_stats)
                     else:
-                        updated_content = stripped_content
-                    
-                    # Upload back to cloud
-                    uploadTextFile(client, bucket_name, object_name, updated_content, generation)
-                    
-                    # Count new lines added
-                    new_lines = len(stripped_content.split('\n'))
+                        duplicates_filtered = len(new_lines_list)
+                        # Even if no new lines were added, we should still show remove stats if applicable
+                        remove_strings = self._load_remove_strings()
+                        remove_stats = {'removed_count': 0, 'remaining_count': 0} if not remove_strings else {'removed_count': 0, 'remaining_count': 0}
+                        self._show_comprehensive_upload_stats(0, duplicates_filtered, remove_stats)
                     
                 finally:
                     # Clean up temporary files
@@ -174,13 +198,20 @@ class InputTab:
                 for line in lines:
                     should_remove = False
                     line_lower = line.lower()
-                    
+                    line_stripped = line.strip()
+
                     # Check if any remove string is contained in the line (case-insensitive)
+                    # OR if the line is identical to any remove string (case-insensitive)
                     for remove_string in remove_strings:
-                        if remove_string.lower() in line_lower:
+                        remove_string_lower = remove_string.lower()
+                        remove_string_stripped = remove_string.strip()
+
+                        # Remove if: 1) contains the string, or 2) is identical to the string
+                        if (remove_string_lower in line_lower or
+                            line_stripped.lower() == remove_string_stripped.lower()):
                             should_remove = True
                             break
-                    
+
                     if not should_remove:
                         kept_lines.append(line)
                 
@@ -195,3 +226,77 @@ class InputTab:
                 
         except Exception as e:
             self.ui_helpers.show_error_message(f"Failed to remove lines: {str(e)}")
+
+    def _apply_remove_lines_logic_after_upload(self, client, bucket_name: str, object_name: str) -> dict:
+        """Apply remove lines logic after upload and return stats."""
+        try:
+            # Get remove strings
+            remove_strings = self._load_remove_strings()
+            if not remove_strings:
+                return {'removed_count': 0, 'remaining_count': 0}
+
+            # Download current content
+            current_content, generation = downloadTextFile(client, bucket_name, object_name)
+
+            if not current_content:
+                return {'removed_count': 0, 'remaining_count': 0}
+
+            # Process lines (same logic as _handle_remove_lines)
+            lines = current_content.split('\n')
+            original_count = len(lines)
+            kept_lines = []
+
+            for line in lines:
+                should_remove = False
+                line_lower = line.lower()
+                line_stripped = line.strip()
+
+                # Check if any remove string is contained in the line (case-insensitive)
+                # OR if the line is identical to any remove string (case-insensitive)
+                for remove_string in remove_strings:
+                    remove_string_lower = remove_string.lower()
+                    remove_string_stripped = remove_string.strip()
+
+                    # Remove if: 1) contains the string, or 2) is identical to the string
+                    if (remove_string_lower in line_lower or
+                        line_stripped.lower() == remove_string_stripped.lower()):
+                        should_remove = True
+                        break
+
+                if not should_remove:
+                    kept_lines.append(line)
+
+            # Upload updated content back to cloud
+            updated_content = '\n'.join(kept_lines)
+            uploadTextFile(client, bucket_name, object_name, updated_content, generation)
+
+            removed_count = original_count - len(kept_lines)
+            return {'removed_count': removed_count, 'remaining_count': len(kept_lines)}
+
+        except Exception as e:
+            # If remove logic fails, don't fail the entire upload - just return zero stats
+            print(f"Warning: Remove lines logic failed: {str(e)}")
+            return {'removed_count': 0, 'remaining_count': 0}
+
+    def _show_comprehensive_upload_stats(self, new_lines: int, duplicates_filtered: int, remove_stats: dict) -> None:
+        """Show comprehensive upload statistics."""
+        removed_count = remove_stats.get('removed_count', 0)
+
+        if new_lines > 0:
+            message_parts = [f"Added {new_lines} new lines to dataset"]
+            if duplicates_filtered > 0:
+                message_parts.append(f"{duplicates_filtered} duplicate lines filtered")
+            if removed_count > 0:
+                message_parts.append(f"{removed_count} lines removed by filters")
+            self.ui_helpers.show_success_message(". ".join(message_parts) + ".")
+        else:
+            if duplicates_filtered > 0:
+                message = f"No new lines added. All {duplicates_filtered} lines were duplicates"
+                if removed_count > 0:
+                    message += f" and {removed_count} lines were removed by filters"
+                self.ui_helpers.show_success_message(message + ".")
+            else:
+                if removed_count > 0:
+                    self.ui_helpers.show_success_message(f"Upload processed. {removed_count} lines removed by filters.")
+                else:
+                    self.ui_helpers.show_success_message("Upload processed successfully.")
