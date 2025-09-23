@@ -9,10 +9,10 @@ REQUIRED
 <craziness: 1 (LEAST), to 4 (MOST)>
 
 CRAZINESS DEFINITIONS
-- 1: Chill, nothing at stake, elementary.
-- 2: Standard option. Includes content normally at 3, but a question for everyone in the game (e.g. never have i ever)
-- 3: High stakes, sharing a lot, hard physical challenges, personal stuff.
-- 4: crazy prompts, sharing everything, crazy challenges, everything really weird
+- 1: Chill, low stakes, simple.
+- 2: Standard play—short, low-pressure challenges or group questions everyone answers (e.g., “Never Have I Ever”); light personal sharing.
+- 3: High stakes—substantial personal sharing or tough physical/creative tasks; uncomfortable but safe; not tell-all, not extreme.
+- 4: Wild—share-everything/no-limits, or if absurd/weird twists.
 
 REQUIRED
 <isSexual: true, false>

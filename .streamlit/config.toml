@@ -1,20 +1,15 @@
 [server]
-
 # Enable CORS for cross-origin requests (required for XSRF protection)
 enableCORS = true
-
 # Enable XSRF protection for security
 enableXsrfProtection = true
-
-# Allow all origins (you can restrict this to specific domains if needed)
-# corsAllowedOrigins = ["*"]
+# Disable file watching entirely for production deployments
+enableFileWatcher = false
 
 [browser]
-
 # Server settings for better compatibility
 serverAddress = "localhost"
 serverPort = 8501
-
 # Enable server CORS to avoid the warning
 server.enableCORS = true
 
@@ -25,3 +20,6 @@ primaryColor="#6224F5"
 [theme]
 base="light"
 primaryColor="#29e0d6"
+
+[logger]
+level = "INFO"
