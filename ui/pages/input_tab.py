@@ -1,4 +1,4 @@
-"""Input tab UI implementation for managing raw_stripped.txt and remove.txt files."""
+"""Input tab UI implementation for managing raw_stripped.txt and REMOVE_LINES.txt files."""
 
 import streamlit as st
 import tempfile
@@ -6,7 +6,7 @@ import os
 from typing import List
 
 from cloud_storage import loadCredentialsFromAptJson, getStorageClient, downloadTextFile, uploadTextFile
-from config import getBucketName, getAptJsonPath, getRawStrippedObjectName
+from config import getBucketName, getAptJsonPath, getRawStrippedObjectName, getRemoveLinesObjectName
 from text_utils import strip_file
 from ui.components.common import UIHelpers
 
@@ -16,7 +16,6 @@ class InputTab:
     
     def __init__(self):
         self.ui_helpers = UIHelpers()
-        self.remove_file_path = "remove.txt"  # Local file
     
     def render(self) -> None:
         """Render the complete input tab."""
@@ -151,24 +150,59 @@ class InputTab:
             self.ui_helpers.show_error_message(f"Failed to process file: {str(e)}")
     
     def _load_remove_strings(self) -> List[str]:
-        """Load remove strings from local remove.txt file."""
+        """Load remove strings from cloud storage (REMOVE_LINES.txt).
+        
+        If cloud file doesn't exist and local remove.txt exists, migrates local to cloud.
+        """
         try:
-            if os.path.exists(self.remove_file_path):
-                with open(self.remove_file_path, 'r', encoding='utf-8') as f:
-                    lines = [line.strip() for line in f.readlines() if line.strip()]
-                    return lines
-            return []
+            credentials = loadCredentialsFromAptJson(getAptJsonPath())
+            client = getStorageClient(credentials)
+            bucket_name = getBucketName()
+            object_name = getRemoveLinesObjectName()
+            
+            content, generation = downloadTextFile(client, bucket_name, object_name)
+            
+            # If cloud file doesn't exist, try to migrate from local file
+            if not content:
+                local_file_path = "remove.txt"
+                if os.path.exists(local_file_path):
+                    try:
+                        with open(local_file_path, 'r', encoding='utf-8') as f:
+                            content = f.read()
+                        
+                        if content:
+                            # Upload to cloud
+                            uploadTextFile(client, bucket_name, object_name, content, generation)
+                            lines = [line.strip() for line in content.split('\n') if line.strip()]
+                            return lines
+                    except Exception as e:
+                        print(f"Warning: Failed to migrate local remove.txt to cloud: {e}")
+                return []
+            
+            lines = [line.strip() for line in content.split('\n') if line.strip()]
+            return lines
         except Exception:
             return []
     
     def _add_remove_string(self, new_string: str) -> None:
-        """Add a new string to the remove.txt file."""
+        """Add a new string to the REMOVE_LINES.txt file in cloud storage."""
         try:
             remove_strings = self._load_remove_strings()
             if new_string not in remove_strings:
                 remove_strings.append(new_string)
-                with open(self.remove_file_path, 'w', encoding='utf-8') as f:
-                    f.write('\n'.join(remove_strings) + '\n')
+                
+                # Upload updated list to cloud storage
+                credentials = loadCredentialsFromAptJson(getAptJsonPath())
+                client = getStorageClient(credentials)
+                bucket_name = getBucketName()
+                object_name = getRemoveLinesObjectName()
+                
+                # Download to get generation for optimistic concurrency
+                _, generation = downloadTextFile(client, bucket_name, object_name)
+                
+                # Upload updated content
+                updated_content = '\n'.join(remove_strings) + '\n'
+                uploadTextFile(client, bucket_name, object_name, updated_content, generation)
             else:
                 st.warning("String already exists in remove list.")
         except Exception as e:

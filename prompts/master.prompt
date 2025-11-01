@@ -1,0 +1,28 @@
+
+GOAL: Take 5 base prompts with placeholders and fill the placeholders.
+
+PARAMETERS (JS-templating):
+{
+“vibe”: {{vibe}},
+“drinking_level”: {{drinking_level}},
+“players_csv”: “{{players_csv}}”,
+"free_text": "{{free_text}}"
+}
+
+CONTEXT:
+• VIBE := {{> vibe_map.[vibe]}}
+• DRINK := {{> drinking_map.[drinking_level]}}
+• CUSTOM INSTRUCTIONS := "{{free_text}}"
+
+
+RULES:
+Replace [PLAYER] with names from players in natural order.
+Replace [DRINKS] with an appropriate amount specified in context. ONLY replace placeholders with drinks. Dont add drinks without placeholders.
+Write everything in Norwegian. One finished line per base prompt. No numbering. No extra text.
+
+OUTPUT FORMAT:
+<line 1>
+<line 2>
+<line 3>
+<line 4>
+<line 5>

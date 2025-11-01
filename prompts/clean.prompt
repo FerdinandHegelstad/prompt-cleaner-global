@@ -6,15 +6,18 @@ OBJECTIVE
 1. **Fix obvious typos** (keyboard slips, repeated letters, simple misspellings) while preserving original meaning and tone. 
    • Don't fix or remove slang
 2. **Anonymise personal names**:  
-   • Detect any first- or last-name that refers to a person (e.g. “Markus”, “Jane Doe”, “Dr Nguyen”).  
+   • Detect any first- or last-name that refers to a person (e.g. “Markus”, “Jane Doe”, “Dr Nguyen”).
    • Replace each occurrence with the exact placeholder **`[PLAYER]`**
    • Do **not** invent or infer names; only replace what is present.
+   • Do **not** remove celebrities or celebrity references (e.g. "Timothee Chalamet", "Stoltenberg")
+
 2. **Remove all references to drinking with a placeholder**
      • Detect drink related parts of a sentence (e.g. "drikk 3 slurker", "drikk", "chug")
      • Replace each ocurrence with the exact placeholder **'[DRINKS]'**
      • Examples of drink types or beverages that are part of the content (not punishment) are excluded.
      • The numerical amount is always a part of the placeholder and should be removed.
 
+EXCEPTION; If the ENTIRE prompt is NOT IN NORWEGIAN: Return [OTHER]
 
 3. Output **only** the cleaned line—no extra words, labels, formatting, or line breaks.
 

@@ -181,6 +181,10 @@ class ParametricsTab:
         if self._render_load_button():
             self._handle_load_action()
         
+        # Render clear all button and handle action
+        if self._render_clear_all_button():
+            self._handle_clear_all_action()
+        
         # Render parameterization runner section
         self._render_parameterization_runner()
         
@@ -197,6 +201,17 @@ class ParametricsTab:
                 use_container_width=True
             )
     
+    def _render_clear_all_button(self) -> bool:
+        """Render clear all button and return True if clicked."""
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 3])
+        
+        with col2:
+            return st.button(
+                "🗑️ Clear All",
+                use_container_width=True,
+                type="secondary"
+            )
+    
     def _handle_load_action(self) -> None:
         """Handle the load button click."""
         try:
@@ -209,6 +224,54 @@ class ParametricsTab:
                 
         except Exception as e:
             self.ui_helpers.show_error_message(f"Failed to load parametrics data: {str(e)}")
+    
+    def _handle_clear_all_action(self) -> None:
+        """Handle the clear all button click."""
+        try:
+            parametrics_service = ParametricsService()
+            current_count = len(parametrics_service.load_parametrics())
+            
+            if current_count == 0:
+                self.ui_helpers.show_info_message("PARAMETRICS.json is already empty.")
+                return
+            
+            # Confirm deletion
+            if st.session_state.get("parametrics_clear_all_confirmed", False):
+                # Actually perform the deletion
+                with self.ui_helpers.with_spinner("Clearing all parameterized content…"):
+                    # Load current data with generation for optimistic concurrency
+                    client = parametrics_service._get_client()
+                    bucket_name = parametrics_service._bucket_name
+                    object_name = parametrics_service._object_name
+                    
+                    from cloud_storage import downloadJson, uploadJsonWithPreconditions
+                    current_data, generation = downloadJson(client, bucket_name, object_name)
+                    
+                    # Upload empty array
+                    uploadJsonWithPreconditions(
+                        client=client,
+                        bucketName=bucket_name,
+                        objectName=object_name,
+                        data=[],
+                        ifGenerationMatch=generation
+                    )
+                    
+                    # Reload data and show success
+                    st.session_state.parametrics_records = DataService.load_parametrics()
+                    st.session_state.parametrics_clear_all_confirmed = False
+                    self.ui_helpers.show_success_message(
+                        f"Successfully cleared {current_count} parameterized items from PARAMETRICS.json"
+                    )
+            else:
+                # Show confirmation message
+                st.session_state.parametrics_clear_all_confirmed = True
+                self.ui_helpers.show_warning_message(
+                    f"⚠️ About to delete ALL {current_count} parameterized items. Click the button again to confirm."
+                )
+                
+        except Exception as e:
+            st.session_state.parametrics_clear_all_confirmed = False
+            self.ui_helpers.show_error_message(f"Failed to clear parametrics: {str(e)}")
     
     def _render_parameterization_runner(self) -> None:
         """Render the parameterization runner section."""

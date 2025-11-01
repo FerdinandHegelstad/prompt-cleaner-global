@@ -4,7 +4,7 @@ from typing import Optional
 from openai import AsyncOpenAI
 from config import getXaiApiKey, getXaiBaseUrl, getXaiModel
 
-with open('clean.prompt', 'r', encoding='utf-8') as f:
+with open('prompts/clean.prompt', 'r', encoding='utf-8') as f:
     SYSTEM_PROMPT = f.read()
 
 def _make_client(api_key: Optional[str] = None, base_url: Optional[str] = None) -> AsyncOpenAI:

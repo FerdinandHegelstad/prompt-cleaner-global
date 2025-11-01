@@ -99,6 +99,16 @@ def getParametricsObjectName() -> str:
     return objectName or "PARAMETRICS.json"
 
 
+def getRemoveLinesObjectName() -> str:
+    """Returns the object name for the REMOVE_LINES.txt file within the bucket.
+
+    Defaults to 'REMOVE_LINES.txt' at the bucket root. Can be overridden via
+    the environment variable GCS_REMOVE_LINES_OBJECT.
+    """
+    objectName: Optional[str] = os.getenv("GCS_REMOVE_LINES_OBJECT")
+    return objectName or "REMOVE_LINES.txt"
+
+
 def _get_st_secrets():
     """Helper to get Streamlit secrets safely."""
     try:

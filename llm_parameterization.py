@@ -56,7 +56,7 @@ class ParameterizationLLM:
     def _load_system_prompt(self) -> None:
         """Load the parameterization system prompt."""
         try:
-            with open('paramaterize.prompt', 'r', encoding='utf-8') as f:
+            with open('prompts/paramaterize.prompt', 'r', encoding='utf-8') as f:
                 self.system_prompt = f.read()
         except FileNotFoundError:
             raise RuntimeError("paramaterize.prompt file not found")
