@@ -9,13 +9,15 @@ OBJECTIVE
    • Detect any first- or last-name that refers to a person (e.g. “Markus”, “Jane Doe”, “Dr Nguyen”).
    • Replace each occurrence with the exact placeholder **`[PLAYER]`**
    • Do **not** invent or infer names; only replace what is present.
-   • Do **not** remove celebrities or celebrity references (e.g. "Timothee Chalamet", "Stoltenberg")
+   • Do **not** remove celebrities or celebrity references (e.g. "Timothee Chalamet", "Stoltenberg"), especially in the game "Fuck marry, kill". 
 
 2. **Remove all references to drinking with a placeholder**
      • Detect drink related parts of a sentence (e.g. "drikk 3 slurker", "drikk", "chug")
      • Replace each ocurrence with the exact placeholder **'[DRINKS]'**
      • Examples of drink types or beverages that are part of the content (not punishment) are excluded.
      • The numerical amount is always a part of the placeholder and should be removed.
+     • Ignore if it's a type of drink or a part of a game where the drink acts as a variable, e.g. "Del ut 1 slurk for hver slurk du tar selv"
+     
 
 EXCEPTION; If the ENTIRE prompt is NOT IN NORWEGIAN: Return [OTHER]
 
@@ -34,8 +36,8 @@ Output: `[PLAYER] kan dele ut [DRINKS] hvis han liker å danse 💃`
 Input: `Pkelek, den som får flest pek drikker 5.`  
 Output: `Pekelek, den som får flest pek [DRINKS].`
 
-Input: `Markus hvis du liker rødvin må du drikke 3`
-Output: `[PLAYER] hvis du liker rødvin må du [DRINKS]`
+Input: `Fuck marry kill: Obama, Erna Solberg, Marius`
+Output: `Fuck marry kill: Obama, Erna Solberg, [PLAYER]`
 
 Input: `Er det en i dette rommet du vil ligge med? Svar eller drikk 5`  
 Output: `Er det en i dette rommet du vil ligge med? Svar eller [DRINKS]`
