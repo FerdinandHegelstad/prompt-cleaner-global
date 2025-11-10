@@ -283,7 +283,7 @@ class ParametricsTab:
             num_items = st.number_input(
                 "Number of items to parameterize",
                 min_value=1,
-                max_value=100,
+                max_value=2000,
                 value=5,
                 step=1
             )
