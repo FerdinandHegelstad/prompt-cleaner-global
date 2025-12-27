@@ -34,8 +34,12 @@ class TableComponents:
     
     @staticmethod
     def render_editable_table(df: pd.DataFrame, key: str, height: int = 600) -> pd.DataFrame:
-        """Render an editable data table with standard configuration."""
-        return st.data_editor(
+        """Render an editable data table with inline editing enabled.
+
+        Returns:
+            edited_dataframe: The dataframe with any user edits applied
+        """
+        edited_df = st.data_editor(
             df,
             key=key,
             width="stretch",
@@ -51,7 +55,8 @@ class TableComponents:
                 ),
                 "cleaned": st.column_config.TextColumn(
                     "cleaned",
-                    disabled=True,
+                    help="Click to edit this text directly in the table",
+                    disabled=False,
                 ),
                 "occurrences": st.column_config.NumberColumn(
                     "occurrences",
@@ -60,6 +65,8 @@ class TableComponents:
                 ),
             },
         )
+
+        return edited_df
     
     @staticmethod
     def render_readonly_table(df: pd.DataFrame, height: int = 400, title: str = "Data") -> None:

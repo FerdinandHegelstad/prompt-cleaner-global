@@ -72,28 +72,28 @@ class ParametricsComponents:
                 ),
                 "prompt": st.column_config.TextColumn(
                     "Prompt",
-                    help="The prompt text",
+                    help="Edit prompt text in the Database tab",
                     width="large",
                     disabled=True,
                 ),
                 "craziness": st.column_config.NumberColumn(
                     "Craziness Level",
-                    help="Level of craziness (1-4)",
+                    help="Click to edit level of craziness (1-4)",
                     min_value=1,
                     max_value=4,
                     step=1,
                     format="%d",
-                    disabled=True,
+                    disabled=False,
                 ),
                 "isSexual": st.column_config.CheckboxColumn(
                     "Is Sexual",
-                    help="Whether the prompt has sexual content",
-                    disabled=True,
+                    help="Click to edit whether the prompt has sexual content",
+                    disabled=False,
                 ),
                 "madeFor": st.column_config.TextColumn(
                     "Made For",
-                    help="Target audience for the prompt",
-                    disabled=True,
+                    help="Click to edit target audience (boys/girls/both)",
+                    disabled=False,
                 ),
             },
         )
@@ -375,13 +375,138 @@ class ParametricsTab:
             sexual_count = len([r for r in records if r.get("isSexual", False)])
             st.metric("Sexual Content", f"{sexual_count} / {total_count}")
         
+        # Initialize original dataframe state for change detection
+        if "parametrics_original_df" not in st.session_state or st.session_state.get("parametrics_records_hash") != hash(str(records)):
+            df_editor = self.components.create_parametrics_editor_dataframe(records)
+            st.session_state.parametrics_original_df = df_editor.copy()
+            st.session_state.parametrics_records_hash = hash(str(records))
+            st.session_state.parametrics_records = records.copy()
+        else:
+            df_editor = st.session_state.parametrics_original_df.copy()
+        
         # Create and display editable table
-        df_editor = self.components.create_parametrics_editor_dataframe(records)
         edited_df = self.components.render_parametrics_editor_table(df_editor, "parametrics_editor")
+        
+        # Auto-save any changes detected
+        self._handle_autosave_changes(edited_df, st.session_state.parametrics_original_df, st.session_state.parametrics_records)
         
         # Handle delete functionality
         if self.components.render_delete_button(disabled=SessionService.is_writing()):
-            self._handle_delete_action(edited_df, records)
+            self._handle_delete_action(edited_df, st.session_state.parametrics_records)
+    
+    def _handle_autosave_changes(self, edited_df: pd.DataFrame, original_df: pd.DataFrame, records: List[Dict[str, Any]]) -> None:
+        """Detect and automatically save any changes made to the parametrics fields (craziness, isSexual, madeFor)."""
+        # Check if there are any changes
+        if edited_df.equals(original_df):
+            return
+        
+        # Prevent re-saving if we just saved (check session state flag)
+        if st.session_state.get("parametrics_just_saved", False):
+            st.session_state.parametrics_just_saved = False
+            return
+        
+        # Find rows where parametrics fields have changed
+        changes_detected = False
+        items_to_save = []
+        
+        for i in range(len(edited_df)):
+            original_prompt = str(original_df.iloc[i]["prompt"]).strip()
+            original_craziness = original_df.iloc[i]["craziness"]
+            original_isSexual = bool(original_df.iloc[i]["isSexual"])
+            original_madeFor = str(original_df.iloc[i]["madeFor"]).strip()
+            
+            edited_craziness = edited_df.iloc[i]["craziness"]
+            edited_isSexual = bool(edited_df.iloc[i]["isSexual"])
+            edited_madeFor = str(edited_df.iloc[i]["madeFor"]).strip()
+            
+            # Check if any parametrics field changed (not prompt)
+            if (original_craziness != edited_craziness or 
+                original_isSexual != edited_isSexual or 
+                original_madeFor != edited_madeFor):
+                changes_detected = True
+                if i < len(records):
+                    items_to_save.append((
+                        i, 
+                        records[i], 
+                        original_prompt,
+                        edited_craziness,
+                        edited_isSexual,
+                        edited_madeFor
+                    ))
+        
+        if not changes_detected:
+            return
+        
+        # Save all changes
+        if SessionService.is_writing():
+            return  # Don't save if already writing
+        
+        try:
+            SessionService.set_writing(True)
+            
+            saved_count = 0
+            with self.ui_helpers.with_spinner("Auto-saving changes…"):
+                parametrics_service = ParametricsService()
+                
+                # Load current data with generation for optimistic concurrency
+                client = parametrics_service._get_client()
+                bucket_name = parametrics_service._bucket_name
+                object_name = parametrics_service._object_name
+                
+                from cloud_storage import downloadJson, uploadJsonWithPreconditions
+                current_data, generation = downloadJson(client, bucket_name, object_name)
+                
+                if not isinstance(current_data, list):
+                    current_data = []
+                
+                # Update each changed item
+                for index, original_record, prompt, new_craziness, new_isSexual, new_madeFor in items_to_save:
+                    # Find the item in current_data by matching the prompt
+                    item_found = False
+                    for item in current_data:
+                        if str(item.get("prompt", "")).strip() == prompt:
+                            # Update the parametrics fields
+                            item["craziness"] = int(new_craziness)
+                            item["isSexual"] = bool(new_isSexual)
+                            item["madeFor"] = str(new_madeFor).strip()
+                            item_found = True
+                            saved_count += 1
+                            break
+                    
+                    if not item_found:
+                        # If not found by prompt, skip this item
+                        continue
+                
+                if saved_count > 0:
+                    # Save the updated data back
+                    uploadJsonWithPreconditions(
+                        client=client,
+                        bucketName=bucket_name,
+                        objectName=object_name,
+                        data=current_data,
+                        ifGenerationMatch=generation
+                    )
+            
+            SessionService.set_writing(False)
+            
+            if saved_count > 0:
+                # Set flag to prevent re-saving on next render
+                st.session_state.parametrics_just_saved = True
+                # Reload data to get fresh state
+                fresh_records = DataService.load_parametrics()
+                st.session_state.parametrics_records = fresh_records
+                # Update records hash to trigger refresh of original_df on next render
+                st.session_state.parametrics_records_hash = hash(str(fresh_records))
+                # Clear original_df so it gets recreated from fresh data
+                if "parametrics_original_df" in st.session_state:
+                    del st.session_state.parametrics_original_df
+                # Show success message
+                st.success(f"✅ Auto-saved {saved_count} change(s)!")
+                st.rerun()
+                
+        except Exception as e:
+            SessionService.set_writing(False)
+            st.error(f"Failed to auto-save changes: {str(e)}")
     
     def _handle_delete_action(self, edited_df: pd.DataFrame, records: List[Dict[str, Any]]) -> None:
         """Handle deletion of selected parametrics items."""
@@ -402,6 +527,9 @@ class ParametricsTab:
             
             # Reload data and show success
             st.session_state.parametrics_records = DataService.load_parametrics()
+            # Clear original_df to force refresh
+            if "parametrics_original_df" in st.session_state:
+                del st.session_state.parametrics_original_df
             self.ui_helpers.show_success_message(
                 f"Deleted {removed} item(s) from the parametrics database."
             )

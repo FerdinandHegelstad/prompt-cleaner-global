@@ -5,8 +5,9 @@ from typing import Dict, Any, List
 
 from ui.components.common import UIHelpers, WorkflowMessages
 from ui.components.tables import BatchReviewComponents
-from ui.services.data_service import SelectionService
+from ui.services.data_service import SelectionService, run_async
 from ui.services.session_service import BatchSessionService
+from text_utils import normalize
 
 
 class SelectionTab:
@@ -40,6 +41,9 @@ class SelectionTab:
         # Handle fetch next action
         if self.batch_components.render_fetch_next_button():
             self._handle_fetch_next()
+
+        # Manual input section
+        self._render_manual_input()
     
     def _load_initial_batch(self) -> None:
         """Load the initial batch of items."""
@@ -96,3 +100,53 @@ class SelectionTab:
         
         # Force rerun to update UI
         st.rerun()
+
+    def _render_manual_input(self) -> None:
+        """Render the manual input section."""
+        st.header("Manual input")
+
+        # Text input field
+        manual_input = st.text_input(
+            "Prompt",
+            key="manual_input"
+        )
+
+        # Add button
+        col1, col2, col3 = st.columns([1, 1, 3])
+        with col1:
+            if st.button("Add", type="primary", use_container_width=True):
+                self._handle_manual_add(manual_input)
+
+    def _handle_manual_add(self, input_text: str) -> None:
+        """Handle adding manual input to the database."""
+        if not input_text or not input_text.strip():
+            st.warning("Please enter some text to add.")
+            return
+
+        try:
+            # Clean and normalize the input
+            cleaned_text = input_text.strip()
+            normalized_text = normalize(cleaned_text).strip()
+
+            if not normalized_text:
+                st.error("The input text resulted in empty normalized text. Please try different text.")
+                return
+
+            # Create the item dictionary
+            item = {
+                "default": input_text.strip(),
+                "cleaned": cleaned_text,
+                "normalized": normalized_text,
+                "occurrences": 1
+            }
+
+            # Add to global database
+            db = self.selection_service.get_cached_db_manager()
+            run_async(db.add_to_global_database(item))
+
+            # Clear the input field by rerunning
+            st.success(f"✅ Added to database: {cleaned_text[:50]}{'...' if len(cleaned_text) > 50 else ''}")
+            st.rerun()
+
+        except Exception as e:
+            st.error(f"Error adding to database: {e}")
