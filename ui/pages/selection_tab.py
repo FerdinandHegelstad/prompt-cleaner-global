@@ -146,6 +146,8 @@ class SelectionTab:
 
             # Clear the input field by rerunning
             st.success(f"✅ Added to database: {cleaned_text[:50]}{'...' if len(cleaned_text) > 50 else ''}")
+            # Reset manual input so the field is blank on rerun
+            st.session_state["manual_input"] = ""
             st.rerun()
 
         except Exception as e:
