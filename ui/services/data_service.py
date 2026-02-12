@@ -1,9 +1,7 @@
 """Data service for loading and managing cloud storage data."""
 
 import asyncio
-from typing import Any, Dict, List, Optional
-
-from pandas.core.frame import console
+from typing import Any, Dict, List
 
 from cloud_storage import (
     downloadJson,
@@ -16,7 +14,6 @@ from config import (
     getBucketName,
     getDatabaseObjectName,
     getDiscardsObjectName,
-    getParametricsObjectName,
     getRawStrippedObjectName,
     getUserSelectionObjectName,
 )
@@ -27,14 +24,11 @@ from workflow import Workflow
 def run_async(coro):
     """Run an async coroutine safely from Streamlit."""
     try:
-        # Check if there's already a running loop
         loop = asyncio.get_running_loop()
-        # If we're already in an async context, we need to create a task
         import nest_asyncio
         nest_asyncio.apply()
         return loop.run_until_complete(coro)
     except RuntimeError:
-        # No running loop, safe to use asyncio.run
         return asyncio.run(coro)
 
 
@@ -72,11 +66,6 @@ class DataService:
         return DataService.load_json_from_storage(getUserSelectionObjectName())
 
     @staticmethod
-    def load_parametrics() -> List[Dict[str, Any]]:
-        """Load parametrics from cloud storage."""
-        return DataService.load_json_from_storage(getParametricsObjectName())
-
-    @staticmethod
     def get_raw_file_count() -> tuple[int, str]:
         """Get raw file line count and status message."""
         try:
@@ -101,7 +90,6 @@ class DataService:
             "global_records": DataService.load_global_database(),
             "discards_records": DataService.load_discards(),
             "user_selection_records": DataService.load_user_selection(),
-            "parametrics_records": DataService.load_parametrics(),
         }
 
 
@@ -122,7 +110,6 @@ class SelectionService:
         try:
             db = self.get_cached_db_manager()
 
-            # Check if USER_SELECTION queue needs more items
             target_queue_size = 50
             queue_count = await db.userSelection.get_user_selection_count()
 
@@ -131,7 +118,6 @@ class SelectionService:
 
             items_needed = target_queue_size - queue_count
 
-            # Check if raw_stripped.txt has content
             bucket_name = getBucketName()
             object_name = getRawStrippedObjectName()
             apt_json_path = getAptJsonPath()
@@ -148,12 +134,10 @@ class SelectionService:
             if non_empty_lines == 0:
                 return
 
-            # Create and run workflow
             items_to_process = min(items_needed, non_empty_lines)
             workflow = Workflow(object_name, items_to_process)
             workflow_result = await workflow.run()
 
-            # Return workflow result for UI handling
             return workflow_result
 
         except Exception:
@@ -165,14 +149,12 @@ class SelectionService:
             db = self.get_cached_db_manager()
             items = []
 
-            # Check current queue count
             count = 0
             try:
                 count = run_async(db.userSelection.get_user_selection_count())
             except Exception:
                 pass
 
-            # Auto-populate if below threshold
             target_queue_size = 50
             populate_threshold = 20
             print(f"Queue count: {count}, threshold: {populate_threshold}")
@@ -181,13 +163,12 @@ class SelectionService:
                 try:
                     result = run_async(self.auto_populate_user_selection_if_needed())
                     if result:
-                        print(f"✅ Workflow result: {result}")
+                        print(f"Workflow result: {result}")
                 except Exception as e:
-                    print(f"❌ Auto-populate failed: {e}")
+                    print(f"Auto-populate failed: {e}")
             else:
-                print(f"✅ Queue has enough items ({count} >= {populate_threshold}), no processing needed")
+                print(f"Queue has enough items ({count} >= {populate_threshold}), no processing needed")
 
-            # Fetch items
             for i in range(batch_size):
                 try:
                     item = run_async(db.pop_user_selection_item())
@@ -203,7 +184,11 @@ class SelectionService:
             return []
 
     def process_batch_items(self, items: List[Dict[str, Any]], discard_actions: set) -> tuple[int, int]:
-        """Process batch items: keep non-discarded, discard selected ones."""
+        """Process batch items: keep non-discarded, discard selected ones.
+        
+        Items are in {"prompt": "..."} format. When keeping, we add with occurrences=1.
+        When discarding, we add with occurrences=1.
+        """
         try:
             db = self.get_cached_db_manager()
             kept_count = 0
@@ -211,17 +196,21 @@ class SelectionService:
             
             for i, item in enumerate(items):
                 discard_key = f"discard_{i}"
+                prompt_val = item.get("prompt", "")
+                
                 if discard_key not in discard_actions:
-                    # Keep item
+                    # Keep item - add to global database
                     try:
-                        run_async(db.add_to_global_database(item))
+                        db_item = {"prompt": prompt_val, "occurrences": 1}
+                        run_async(db.add_to_global_database(db_item))
                         kept_count += 1
                     except Exception:
                         pass
                 else:
                     # Discard item
                     try:
-                        run_async(db.add_to_discards(item))
+                        discard_item = {"prompt": prompt_val, "occurrences": 1}
+                        run_async(db.add_to_discards(discard_item))
                         discarded_count += 1
                     except Exception:
                         pass

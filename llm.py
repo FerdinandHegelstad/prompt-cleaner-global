@@ -1,4 +1,5 @@
-#!llm.py
+"""LLM client for cleaning raw prompt text via xAI Grok."""
+
 import asyncio
 from typing import Optional
 from openai import AsyncOpenAI
@@ -15,31 +16,29 @@ def _make_client(api_key: Optional[str] = None, base_url: Optional[str] = None) 
     return AsyncOpenAI(api_key=key, base_url=base_url or getXaiBaseUrl())
 
 async def call_llm(
-    default: str,
+    raw_text: str,
     *,
     api_key: Optional[str] = None,
     base_url: Optional[str] = None,
     model: Optional[str] = None,
     max_retries: int = 3,
 ) -> str:
-    """Calls the xAI Grok API asynchronously to clean the string.
+    """Call the xAI Grok API to clean a raw prompt string.
 
-    This function will ALWAYS call the LLM and wait for a response.
-    There is NO fallback to original text - the workflow must go through LLM processing.
+    Always calls the LLM -- there is no fallback to the original text.
 
     Args:
-        default: The default string as user input.
-        api_key: Optional API key (will use config if not provided)
-        base_url: Optional base URL (will use config if not provided)
-        model: Optional model name (will use config if not provided)
-        max_retries: Maximum number of retries on failure (default: 3)
+        raw_text: The raw, unprocessed string to clean.
+        api_key: Optional API key override.
+        base_url: Optional base URL override.
+        model: Optional model name override.
+        max_retries: Maximum retry attempts on failure.
 
     Returns:
-        The cleaned string from LLM.
+        The cleaned string from the LLM.
 
     Raises:
-        RuntimeError: If API key is not available
-        Exception: If LLM call fails after all retries
+        RuntimeError: If API key is missing or all retries exhausted.
     """
     client = _make_client(api_key, base_url)
     mdl = model or getXaiModel()
@@ -54,7 +53,7 @@ async def call_llm(
                     {"role": "user",
                      "content": ("One line in → one line out. Clean this exactly as instructed. "
                                  "Return only the cleaned line, no quotes, no punctuation changes beyond rules, "
-                                 f"no extra whitespace. Input: {default}")},
+                                 f"no extra whitespace. Input: {raw_text}")},
                 ],
                 temperature=0.0,
                 max_tokens=1000,
@@ -65,26 +64,23 @@ async def call_llm(
             last_exception = e
             error_msg = str(e).lower()
 
-            # Check if it's a rate limit error (429)
             if "429" in error_msg or "rate limit" in error_msg:
                 if attempt < max_retries:
-                    wait_time = (2 ** attempt) * 60  # Exponential backoff in seconds
-                    print(f"LLM rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                    wait_time = (2 ** attempt) * 60
+                    print(f"LLM rate limited. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
                     await asyncio.sleep(wait_time)
                     continue
                 else:
-                    raise RuntimeError(f"LLM rate limit exceeded after {max_retries} retries. Cannot proceed without LLM processing.")
+                    raise RuntimeError(f"LLM rate limit exceeded after {max_retries} retries.")
             else:
-                # For other errors, retry with shorter backoff
                 if attempt < max_retries:
-                    wait_time = (2 ** attempt) * 10  # Shorter backoff for other errors
-                    print(f"LLM error: {e}. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                    wait_time = (2 ** attempt) * 10
+                    print(f"LLM error: {e}. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
                     await asyncio.sleep(wait_time)
                     continue
                 else:
                     raise RuntimeError(f"LLM call failed after {max_retries} retries: {e}")
 
-    # This should never be reached, but just in case
     raise last_exception or RuntimeError("LLM call failed for unknown reason")
 
 def call_llm_sync(*args, **kwargs) -> str:

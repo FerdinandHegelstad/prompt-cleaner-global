@@ -1,13 +1,12 @@
-#!workflow.py
+"""Workflow for ingesting raw prompts: sample from GCS, clean via LLM, deduplicate, store."""
+
 import asyncio
-import os
 import random
 import sys
-from pathlib import Path
 from typing import List
 
 from database import DatabaseManager
-from analyse_item import Item
+from models import Item
 from llm import call_llm
 from text_utils import normalize
 from cloud_storage import downloadTextFile, getStorageClient, loadCredentialsFromAptJson, uploadTextFile
@@ -44,7 +43,7 @@ class Workflow:
             if not items:
                 return {"status": "no_items", "message": "No items to process", "processed": 0, "failed": 0}
 
-            item_objs = [Item(default=s) for s in items]
+            item_objs = [Item(raw=s) for s in items]
             results = await self._process_items(item_objs)
 
             successful = sum(1 for result in results if result["success"])
@@ -61,10 +60,7 @@ class Workflow:
             return {"status": "error", "message": f"Workflow error: {str(e)}", "processed": 0, "failed": 0}
 
     async def _select_and_remove_items(self) -> List[str]:
-        """Selects items using probability-based sampling and removes them from the GCS stripped file.
-
-        Uses normal distribution based on prompt length statistics to favor items
-        with lengths closer to the mean (bell curve sampling).
+        """Selects items using random sampling and removes them from the GCS stripped file.
 
         Returns:
             List of selected items.
@@ -97,22 +93,12 @@ class Workflow:
         return selected_items
 
     async def _process_items(self, item_objs: List[Item]) -> List[dict]:
-        """Processes items concurrently and returns results.
-
-        Args:
-            item_objs: List of Item objects.
-
-        Returns:
-            List of result dictionaries with success status.
-        """
+        """Processes items concurrently and returns results."""
         results = await asyncio.gather(*[self._process_single_item(item) for item in item_objs])
         return results
 
     async def _process_single_item(self, item: Item) -> dict:
-        """Processes a single item: cleans, normalizes, checks db, adds if unique.
-
-        This function will attempt LLM processing with better error handling.
-        If LLM fails, it will skip the item instead of crashing the entire workflow.
+        """Processes a single item: cleans via LLM, checks db, adds if unique.
 
         Args:
             item: The Item to process.
@@ -121,12 +107,12 @@ class Workflow:
             Dictionary with success status and message.
         """
         try:
-            print(f"DEBUG: Processing item: {item.default[:50]}", flush=True)
+            print(f"DEBUG: Processing item: {item.raw[:50]}", flush=True)
             import sys
             sys.stdout.flush()
 
-            # Call LLM - this will either succeed or raise an exception
-            cleaned = await call_llm(item.default)
+            # Call LLM to clean the raw text
+            cleaned = await call_llm(item.raw)
 
             # Post-process the LLM output to enforce one non-empty line
             cleaned = cleaned.strip()
@@ -141,38 +127,36 @@ class Workflow:
             if (cleaned.startswith('"') and cleaned.endswith('"')) or (cleaned.startswith("'") and cleaned.endswith("'")):
                 cleaned = cleaned[1:-1].strip()
 
-            item.cleaned = cleaned
+            item.prompt = cleaned
+
+            # Verify normalization produces a non-empty result
             normalized = normalize(cleaned).strip()
             if not normalized:
                 return {"success": False, "message": "Normalization resulted in empty string"}
 
-            item.normalized = normalized
-
-            # Always check for duplicates against Cloud DB and discards
+            # Check for duplicates against Cloud DB, discards, and user selection
+            # The DB layer internally normalizes the prompt for dedup
             try:
-                exists = await self.db_manager.exists_in_database(item.normalized) # type: ignore
+                exists = await self.db_manager.exists_in_database(item.prompt)
             except Exception as e:
-                # Log but don't crash - continue with processing
                 exists = False
 
             if not exists:
-                # Add locally for user review only. The UI's Keep action will
-                # perform the append to the global database explicitly.
+                # Add to user selection for human review
                 await self.db_manager.add_to_user_selection(item.to_dict())
                 return {"success": True, "message": "Item processed and added to selection"}
             else:
                 # Item is duplicate - increment occurrence count
                 try:
-                    await self.db_manager.increment_occurrence_count(item.normalized) # type: ignore
-                    print(f"⚠️  Prompt already exists: '{item.default[:80]}'")
+                    await self.db_manager.increment_occurrence_count(item.prompt)
+                    print(f"⚠️  Prompt already exists: '{item.raw[:80]}'")
                     return {"success": True, "message": "Item skipped (duplicate, occurrence incremented)"}
                 except Exception as e:
-                    print(f"⚠️  Prompt already exists: '{item.default[:80]}'")
+                    print(f"⚠️  Prompt already exists: '{item.raw[:80]}'")
                     return {"success": True, "message": "Item skipped (duplicate)"}
 
         except Exception as e:
-            # Log the error but continue processing other items
-            error_msg = f"Error processing item '{item.default[:50]}': {e}"
+            error_msg = f"Error processing item '{item.raw[:50]}': {e}"
             return {"success": False, "message": error_msg}
 
 if __name__ == "__main__":

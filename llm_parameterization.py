@@ -2,7 +2,9 @@
 """
 LLM Parameterization Workflow
 
-Processes cleaned entries from the database and generates parametric data using LLM.
+Processes database entries that have not yet been parameterized and updates
+them in-place with parametric data (craziness, isSexual, madeFor) using LLM.
+
 Usage: python llm_parameterization.py <number_of_items>
 """
 
@@ -22,7 +24,6 @@ from config import (
     getAptJsonPath,
     getBucketName,
     getDatabaseObjectName,
-    getParametricsObjectName,
     getXaiApiKey,
     getXaiBaseUrl,
     getXaiModel,
@@ -56,10 +57,10 @@ class ParameterizationLLM:
     def _load_system_prompt(self) -> None:
         """Load the parameterization system prompt."""
         try:
-            with open('prompts/paramaterize.prompt', 'r', encoding='utf-8') as f:
+            with open('prompts/parameterize.prompt', 'r', encoding='utf-8') as f:
                 self.system_prompt = f.read()
         except FileNotFoundError:
-            raise RuntimeError("paramaterize.prompt file not found")
+            raise RuntimeError("parameterize.prompt file not found")
     
     def _get_client(self) -> AsyncOpenAI:
         """Get or create the OpenAI client."""
@@ -73,19 +74,19 @@ class ParameterizationLLM:
             )
         return self.client
     
-    async def parameterize(self, cleaned_text: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
+    async def parameterize(self, prompt_text: str, max_retries: int = 3) -> Optional[Dict[str, Any]]:
         """
-        Call LLM to parameterize a cleaned text entry.
+        Call LLM to parameterize a prompt text.
         
         Args:
-            cleaned_text: The cleaned text to parameterize
+            prompt_text: The prompt text to parameterize
             max_retries: Maximum number of retries on failure
             
         Returns:
             Dictionary with parametric data or None if failed
         """
         client = self._get_client()
-        model = "grok-4-fast-reasoning"  # Use grok-4-fast-reasoning specifically for parameterization
+        model = "grok-4-fast-reasoning"
         last_exception = None
         
         for attempt in range(max_retries + 1):
@@ -97,14 +98,14 @@ class ParameterizationLLM:
                     model=model,
                     messages=[
                         {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": f"Input:\n{cleaned_text}"}
+                        {"role": "user", "content": f"Input:\n{prompt_text}"}
                     ],
                     temperature=temp,
                     max_tokens=1000,
                 )
                 
                 response_text = response.choices[0].message.content
-                print(f"\n🤖 LLM RAW RESPONSE for '{cleaned_text[:50]}...':")
+                print(f"\n🤖 LLM RAW RESPONSE for '{prompt_text[:50]}...':")
                 print(f"{'='*60}")
                 print(response_text)
                 print(f"{'='*60}")
@@ -118,21 +119,18 @@ class ParameterizationLLM:
                     result = json.loads(response_text.strip())
                     print(f"✅ Valid JSON parsed: {json.dumps(result, indent=2)}")
                     
-                    # Validate against schema
                     if self._validate_json_schema(result):
                         print(f"✅ Schema validation passed")
                         return result
                     else:
-                        print(f"❌ Schema validation failed for '{cleaned_text[:50]}...'")
-                        print(f"   Expected: prompt(str), craziness(1-4), isSexual(bool), madeFor(optional)")
+                        print(f"❌ Schema validation failed for '{prompt_text[:50]}...'")
                         return None
                         
                 except json.JSONDecodeError as e:
-                    print(f"❌ JSON parse error for '{cleaned_text[:50]}...': {e}")
+                    print(f"❌ JSON parse error for '{prompt_text[:50]}...': {e}")
                     print(f"   Raw response: {repr(response_text)}")
                     
-                    # Try to recover partial JSON
-                    recovered_json = self._try_recover_partial_json(response_text, cleaned_text)
+                    recovered_json = self._try_recover_partial_json(response_text, prompt_text)
                     if recovered_json:
                         print(f"🔧 Recovered partial JSON: {json.dumps(recovered_json, indent=2)}")
                         if self._validate_json_schema(recovered_json):
@@ -141,7 +139,6 @@ class ParameterizationLLM:
                         else:
                             print(f"❌ Recovered JSON failed validation")
                     
-                    # If this is not the last attempt, continue to retry
                     if attempt < max_retries:
                         print(f"🔄 Retrying with higher temperature...")
                         continue
@@ -152,7 +149,6 @@ class ParameterizationLLM:
                 last_exception = e
                 error_msg = str(e).lower()
                 
-                # Handle rate limits
                 if "429" in error_msg or "rate limit" in error_msg:
                     if attempt < max_retries:
                         wait_time = (2 ** attempt) * 60
@@ -160,30 +156,26 @@ class ParameterizationLLM:
                         await asyncio.sleep(wait_time)
                         continue
                 else:
-                    # Other errors
                     if attempt < max_retries:
                         wait_time = (2 ** attempt) * 10
                         print(f"⚠️  LLM error: {e}. Waiting {wait_time}s before retry {attempt + 1}/{max_retries}")
                         await asyncio.sleep(wait_time)
                         continue
         
-        print(f"❌ Failed to parameterize '{cleaned_text[:50]}...' after {max_retries} retries")
+        print(f"❌ Failed to parameterize '{prompt_text[:50]}...' after {max_retries} retries")
         return None
     
     def _validate_json_schema(self, data: Any) -> bool:
         """Validate JSON data against the parametrics schema."""
         try:
-            # Basic type checks
             if not isinstance(data, dict):
                 return False
             
-            # Required fields
             required_fields = ["prompt", "craziness", "isSexual"]
             for field in required_fields:
                 if field not in data:
                     return False
             
-            # Field type and value validation
             if not isinstance(data["prompt"], str) or len(data["prompt"].strip()) == 0:
                 return False
             
@@ -193,12 +185,10 @@ class ParameterizationLLM:
             if not isinstance(data["isSexual"], bool):
                 return False
             
-            # Optional madeFor field
             if "madeFor" in data:
                 if not isinstance(data["madeFor"], str) or data["madeFor"] not in ["boys", "girls"]:
                     return False
             
-            # No additional properties
             allowed_fields = {"prompt", "craziness", "isSexual", "madeFor"}
             if set(data.keys()) - allowed_fields:
                 return False
@@ -211,44 +201,35 @@ class ParameterizationLLM:
     def _try_recover_partial_json(self, response_text: str, original_prompt: str) -> Optional[Dict[str, Any]]:
         """Attempt to recover a partial/truncated JSON response."""
         try:
-            # Common patterns for incomplete JSON
             response_text = response_text.strip()
             
-            # If it looks like it starts with JSON but is incomplete
             if response_text.startswith('{') and not response_text.endswith('}'):
-                # Try to complete common patterns
-                
-                # Pattern 1: Missing closing brace and isSexual field
                 if '"craziness":' in response_text and '"isSexual"' not in response_text:
-                    # Extract craziness value
                     import re
                     craziness_match = re.search(r'"craziness":\s*(\d+)', response_text)
                     if craziness_match:
                         craziness = int(craziness_match.group(1))
                         if 1 <= craziness <= 4:
-                            # Construct complete JSON
                             recovered = {
                                 "prompt": original_prompt,
                                 "craziness": craziness,
-                                "isSexual": False  # Default to false for safety
+                                "isSexual": False
                             }
                             return recovered
                 
-                # Pattern 2: Try to add missing closing brace
                 if response_text.count('{') > response_text.count('}'):
                     try_complete = response_text + '}'
                     try:
                         return json.loads(try_complete)
-                    except:
+                    except Exception:
                         pass
                 
-                # Pattern 3: Try to add missing fields and closing brace
                 if '"prompt":' in response_text and '"craziness":' in response_text:
-                    if not response_text.endswith(',') and not '"isSexual"' in response_text:
+                    if not response_text.endswith(',') and '"isSexual"' not in response_text:
                         try_complete = response_text.rstrip(',') + ', "isSexual": false}'
                         try:
                             return json.loads(try_complete)
-                        except:
+                        except Exception:
                             pass
             
             return None
@@ -257,7 +238,11 @@ class ParameterizationLLM:
 
 
 class ParameterizationWorkflow:
-    """Main workflow for parameterizing database entries."""
+    """Main workflow for parameterizing database entries.
+    
+    Reads from DATABASE.json, filters entries that lack parametric fields,
+    processes them via LLM, and updates the entries in-place in DATABASE.json.
+    """
     
     def __init__(self, num_items: int):
         """Initialize the workflow."""
@@ -266,7 +251,6 @@ class ParameterizationWorkflow:
         self.client = None
         self.bucket_name = None
         self.database_object = None
-        self.parametrics_object = None
         
     def _get_storage_client(self):
         """Get or create storage client."""
@@ -275,7 +259,6 @@ class ParameterizationWorkflow:
             self.client = getStorageClient(credentials)
             self.bucket_name = getBucketName()
             self.database_object = getDatabaseObjectName()
-            self.parametrics_object = getParametricsObjectName()
         return self.client
     
     async def run(self) -> Dict[str, int]:
@@ -283,35 +266,37 @@ class ParameterizationWorkflow:
         print(f"🚀 Starting parameterization workflow for {self.num_items} items")
         
         # Load data
-        print("📥 Loading database and parametrics data...")
+        print("📥 Loading database entries...")
         database_entries = await self._load_database_entries()
-        existing_parametrics = await self._load_existing_parametrics()
         
         if not database_entries:
             print("❌ No database entries found")
             return {"processed": 0, "skipped": 0, "failed": 0, "added": 0}
         
         print(f"📊 Found {len(database_entries)} database entries")
-        print(f"📊 Found {len(existing_parametrics)} existing parametrics")
         
-        # Filter and select items
-        available_items = self._filter_available_items(database_entries, existing_parametrics)
+        # Filter entries that need parameterization (no craziness field)
+        available_items = self._filter_unparameterized(database_entries)
+        already_parameterized = len(database_entries) - len(available_items)
+        print(f"📊 Already parameterized: {already_parameterized}")
+        print(f"📊 Needing parameterization: {len(available_items)}")
+        
         selected_items = self._select_random_items(available_items, self.num_items)
         
         print(f"🎯 Selected {len(selected_items)} items for processing")
         
         if not selected_items:
             print("ℹ️  No new items to process")
-            return {"processed": 0, "skipped": len(database_entries) - len(available_items), "failed": 0, "added": 0}
+            return {"processed": 0, "skipped": already_parameterized, "failed": 0, "added": 0}
         
-        # Process items
-        stats = await self._process_items(selected_items, existing_parametrics)
+        # Process items and update in-place
+        stats = await self._process_items(selected_items)
         
         print(f"✅ Workflow completed:")
         print(f"   📊 Processed: {stats['processed']}")
         print(f"   ⏭️  Skipped: {stats['skipped']}")
         print(f"   ❌ Failed: {stats['failed']}")
-        print(f"   ✅ Added: {stats['added']}")
+        print(f"   ✅ Updated: {stats['added']}")
         
         return stats
     
@@ -325,27 +310,16 @@ class ParameterizationWorkflow:
             print(f"❌ Error loading database: {e}")
             return []
     
-    async def _load_existing_parametrics(self) -> List[Dict[str, Any]]:
-        """Load existing parametrics data."""
-        try:
-            client = self._get_storage_client()
-            data, _ = downloadJson(client, self.bucket_name, self.parametrics_object)
-            return data if isinstance(data, list) else []
-        except Exception as e:
-            print(f"⚠️  Error loading parametrics (may not exist yet): {e}")
-            return []
-    
-    def _filter_available_items(self, database_entries: List[Dict[str, Any]], 
-                              existing_parametrics: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Filter database entries that haven't been parameterized yet."""
-        existing_prompts = {item.get("prompt", "") for item in existing_parametrics}
+    def _filter_unparameterized(self, database_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Filter database entries that haven't been parameterized yet.
         
+        An entry is considered unparameterized if it lacks the 'craziness' field.
+        """
         available = []
         for entry in database_entries:
-            cleaned = entry.get("cleaned", "").strip()
-            if cleaned and cleaned not in existing_prompts:
+            prompt = entry.get("prompt", "").strip()
+            if prompt and "craziness" not in entry:
                 available.append(entry)
-        
         return available
     
     def _select_random_items(self, available_items: List[Dict[str, Any]], 
@@ -353,68 +327,102 @@ class ParameterizationWorkflow:
         """Select random items from available items."""
         if len(available_items) <= num_items:
             return available_items
-        
         return random.sample(available_items, num_items)
     
-    async def _process_items(self, items: List[Dict[str, Any]], 
-                           existing_parametrics: List[Dict[str, Any]]) -> Dict[str, int]:
-        """Process the selected items."""
+    async def _process_items(self, items: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Process the selected items and update them in DATABASE.json."""
         stats = {"processed": 0, "skipped": 0, "failed": 0, "added": 0}
-        new_parametrics = []
+        pending_updates: List[Dict[str, Any]] = []
         
         for i, item in enumerate(items, 1):
-            cleaned = item.get("cleaned", "").strip()
-            if not cleaned:
+            prompt = item.get("prompt", "").strip()
+            if not prompt:
                 stats["skipped"] += 1
                 continue
             
-            print(f"🔄 Processing {i}/{len(items)}: '{cleaned[:50]}{'...' if len(cleaned) > 50 else ''}'")
+            print(f"🔄 Processing {i}/{len(items)}: '{prompt[:50]}{'...' if len(prompt) > 50 else ''}'")
             
             # Call LLM for parameterization
-            result = await self.llm.parameterize(cleaned)
+            result = await self.llm.parameterize(prompt)
             stats["processed"] += 1
             
             if result:
-                new_parametrics.append(result)
+                pending_updates.append({
+                    "prompt": prompt,
+                    "craziness": result["craziness"],
+                    "isSexual": result["isSexual"],
+                    "madeFor": result.get("madeFor"),
+                })
                 stats["added"] += 1
                 print(f"   ✅ Added: craziness={result['craziness']}, sexual={result['isSexual']}")
                 
                 # Save incrementally every 5 items
-                if len(new_parametrics) % 5 == 0:
-                    await self._save_parametrics_incremental(existing_parametrics + new_parametrics)
+                if len(pending_updates) % 5 == 0:
+                    await self._apply_updates_to_database(pending_updates)
+                    pending_updates = []
             else:
                 stats["failed"] += 1
                 print(f"   ❌ Failed to parameterize")
         
-        # Final save
-        if new_parametrics:
-            final_parametrics = existing_parametrics + new_parametrics
-            await self._save_parametrics_incremental(final_parametrics)
+        # Final save for remaining updates
+        if pending_updates:
+            await self._apply_updates_to_database(pending_updates)
         
         return stats
     
-    async def _save_parametrics_incremental(self, parametrics_data: List[Dict[str, Any]]) -> bool:
-        """Save parametrics data incrementally."""
+    async def _apply_updates_to_database(self, updates: List[Dict[str, Any]], max_retries: int = 5) -> bool:
+        """Apply parametric updates to entries in DATABASE.json.
+        
+        Downloads the database, finds matching entries by prompt,
+        merges parametric fields, and uploads with optimistic concurrency.
+        """
+        if not updates:
+            return True
+            
         try:
             client = self._get_storage_client()
             
-            # Get current generation for optimistic concurrency
-            current_data, generation = downloadJson(client, self.bucket_name, self.parametrics_object)
-            
-            # Upload with precondition
-            uploadJsonWithPreconditions(
-                client=client,
-                bucketName=self.bucket_name,
-                objectName=self.parametrics_object,
-                data=parametrics_data,
-                ifGenerationMatch=generation
-            )
-            
-            print(f"💾 Saved {len(parametrics_data)} parametrics to cloud storage")
-            return True
+            attempt = 0
+            backoff = 0.2
+            while True:
+                try:
+                    data, generation = downloadJson(client, self.bucket_name, self.database_object)
+                    
+                    # Build lookup for quick matching
+                    update_map = {u["prompt"]: u for u in updates}
+                    
+                    updated_count = 0
+                    for entry in data:
+                        entry_prompt = entry.get("prompt", "").strip()
+                        if entry_prompt in update_map:
+                            upd = update_map[entry_prompt]
+                            entry["craziness"] = upd["craziness"]
+                            entry["isSexual"] = upd["isSexual"]
+                            if upd.get("madeFor"):
+                                entry["madeFor"] = upd["madeFor"]
+                            updated_count += 1
+                    
+                    if updated_count > 0:
+                        uploadJsonWithPreconditions(
+                            client=client,
+                            bucketName=self.bucket_name,
+                            objectName=self.database_object,
+                            data=data,
+                            ifGenerationMatch=generation
+                        )
+                        print(f"💾 Updated {updated_count} entries in DATABASE.json")
+                    
+                    return True
+                    
+                except Exception as e:
+                    attempt += 1
+                    if attempt > max_retries:
+                        raise
+                    await asyncio.sleep(backoff)
+                    backoff = min(backoff * 2, 2.0)
             
         except Exception as e:
-            print(f"❌ Error saving parametrics: {e}")
+            print(f"❌ Error updating database: {e}")
             return False
 
 

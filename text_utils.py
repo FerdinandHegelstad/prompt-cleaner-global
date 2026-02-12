@@ -1,8 +1,4 @@
-#!text_utils.py
-"""
-Text processing utilities for cleaning and filtering text files.
-Combines functionality from stripper.py and remove_lines.py.
-"""
+"""Text processing utilities: normalization, deduplication keys, date detection, line filtering."""
 
 import re
 import sys

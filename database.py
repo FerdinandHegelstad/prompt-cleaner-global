@@ -1,7 +1,7 @@
-#!database.py
+"""Database layer: GCS-backed stores for prompts, user selection, and discards."""
+
 import asyncio
 import json
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from cloud_storage import (
@@ -13,11 +13,19 @@ from cloud_storage import (
     uploadTextFile,
 )
 from config import getAptJsonPath, getBucketName, getDatabaseObjectName, getUserSelectionObjectName, getDiscardsObjectName
-from text_utils import build_dedup_key
+from text_utils import build_dedup_key, normalize
+
+
+def _prompt_dedup_key(prompt: str) -> str:
+    """Compute a dedup key from a prompt string (normalize then dedup)."""
+    return build_dedup_key(normalize(str(prompt or '')))
 
 
 class UserSelectionStore:
-    """Shared store for user selections in Google Cloud Storage."""
+    """Shared store for user selections in Google Cloud Storage.
+
+    New format: each entry is {"prompt": "..."}.
+    """
 
     def __init__(self) -> None:
         self._lock = None
@@ -31,7 +39,6 @@ class UserSelectionStore:
     async def initialize(self) -> None:
         if self._initialized:
             return
-        # Resolve config lazily to allow local-only workflows without env set
         self._lock = asyncio.Lock()
         self._bucketName = getBucketName()
         self._objectName = getUserSelectionObjectName()
@@ -47,7 +54,6 @@ class UserSelectionStore:
         assert self._bucketName is not None
         assert self._objectName is not None
 
-        # Download from GCS
         content, generation = downloadTextFile(self._client, self._bucketName, self._objectName)
         self._currentGeneration = generation
 
@@ -69,7 +75,6 @@ class UserSelectionStore:
         assert self._bucketName is not None
         assert self._objectName is not None
 
-        # Upload to GCS with optimistic concurrency
         jsonText = json.dumps(data, ensure_ascii=False, indent=4)
 
         attempt = 0
@@ -92,15 +97,12 @@ class UserSelectionStore:
                     raise
                 await asyncio.sleep(backoffSeconds)
                 backoffSeconds = min(backoffSeconds * 2, 2.0)
-                # Refresh data and generation
                 await self._load_json()
 
     async def add_to_user_selection(self, item: Dict[str, Any]) -> None:
-        # Guard against empty records
-        defaultVal = (item.get('default') or '').strip()
-        cleanedVal = (item.get('cleaned') or '').strip()
-        normalizedVal = (item.get('normalized') or '').strip()
-        if not defaultVal or not cleanedVal or not normalizedVal:
+        """Add an item to user selection. Expects {"prompt": "..."}."""
+        promptVal = (item.get('prompt') or '').strip()
+        if not promptVal:
             return
 
         if not self._initialized:
@@ -110,14 +112,14 @@ class UserSelectionStore:
             data = await self._load_json()
 
             # Prevent duplicates by dedup key
-            candidateKey = build_dedup_key(normalizedVal)
+            candidateKey = _prompt_dedup_key(promptVal)
             if candidateKey:
                 for existing in data:
-                    existingNorm = str(existing.get('normalized') or '')
-                    if build_dedup_key(existingNorm) == candidateKey:
+                    existingPrompt = str(existing.get('prompt') or '')
+                    if _prompt_dedup_key(existingPrompt) == candidateKey:
                         return
 
-            data.append({'default': defaultVal, 'cleaned': cleanedVal, 'normalized': normalizedVal})
+            data.append({'prompt': promptVal})
             await self._save_json(data)
 
     async def get_user_selection_count(self) -> int:
@@ -125,16 +127,16 @@ class UserSelectionStore:
         data = await self._load_json()
         return len(data)
 
-    async def exists_in_user_selection(self, normalized: str) -> bool:
+    async def exists_in_user_selection(self, prompt: str) -> bool:
         """Check if an item exists in user selection using dedup key matching."""
         data = await self._load_json()
-        candidateKey = build_dedup_key(str(normalized or ''))
+        candidateKey = _prompt_dedup_key(prompt)
         if not candidateKey:
             return False
 
         for existing in data:
-            existingNorm = str(existing.get('normalized') or '')
-            if build_dedup_key(existingNorm) == candidateKey:
+            existingPrompt = str(existing.get('prompt') or '')
+            if _prompt_dedup_key(existingPrompt) == candidateKey:
                 return True
         return False
 
@@ -151,7 +153,10 @@ class UserSelectionStore:
 
 
 class DiscardedItemsStore:
-    """Store for discarded items in Google Cloud Storage."""
+    """Store for discarded items in Google Cloud Storage.
+
+    New format: each entry is {"prompt": "...", "occurrences": N}.
+    """
 
     def __init__(self) -> None:
         self._lock = None
@@ -165,7 +170,6 @@ class DiscardedItemsStore:
     async def initialize(self) -> None:
         if self._initialized:
             return
-        # Resolve config lazily to allow local-only workflows without env set
         self._lock = asyncio.Lock()
         self._bucketName = getBucketName()
         self._objectName = getDiscardsObjectName()
@@ -181,7 +185,6 @@ class DiscardedItemsStore:
         assert self._bucketName is not None
         assert self._objectName is not None
 
-        # Download from GCS
         content, generation = downloadTextFile(self._client, self._bucketName, self._objectName)
         self._currentGeneration = generation
 
@@ -203,7 +206,6 @@ class DiscardedItemsStore:
         assert self._bucketName is not None
         assert self._objectName is not None
 
-        # Upload to GCS with optimistic concurrency
         jsonText = json.dumps(data, ensure_ascii=False, indent=4)
 
         attempt = 0
@@ -226,16 +228,12 @@ class DiscardedItemsStore:
                     raise
                 await asyncio.sleep(backoffSeconds)
                 backoffSeconds = min(backoffSeconds * 2, 2.0)
-                # Refresh data and generation
                 await self._load_json()
 
     async def add_to_discards(self, item: Dict[str, Any]) -> None:
-        """Add an item to the discards store."""
-        # Guard against empty records
-        defaultVal = (item.get('default') or '').strip()
-        cleanedVal = (item.get('cleaned') or '').strip()
-        normalizedVal = (item.get('normalized') or '').strip()
-        if not defaultVal or not cleanedVal or not normalizedVal:
+        """Add an item to the discards store. Expects {"prompt": "...", "occurrences": N}."""
+        promptVal = (item.get('prompt') or '').strip()
+        if not promptVal:
             return
 
         if not self._initialized:
@@ -245,65 +243,63 @@ class DiscardedItemsStore:
             data = await self._load_json()
 
             # Check for existing item and increment occurrences if found
-            candidateKey = build_dedup_key(normalizedVal)
+            candidateKey = _prompt_dedup_key(promptVal)
             if candidateKey:
                 for existing in data:
-                    existingNorm = str(existing.get('normalized') or '')
-                    if build_dedup_key(existingNorm) == candidateKey:
-                        # Increment occurrences of existing item
+                    existingPrompt = str(existing.get('prompt') or '')
+                    if _prompt_dedup_key(existingPrompt) == candidateKey:
                         existing['occurrences'] = existing.get('occurrences', 1) + 1
                         await self._save_json(data)
                         return
 
-            # Add new item with occurrences field
+            # Add new item
             new_item = {
-                'default': defaultVal, 
-                'cleaned': cleanedVal, 
-                'normalized': normalizedVal,
-                'occurrences': item.get('occurrences', 1)
+                'prompt': promptVal,
+                'occurrences': item.get('occurrences', 1),
             }
             data.append(new_item)
             await self._save_json(data)
 
-    async def exists_in_discards(self, normalized: str) -> bool:
-        """Check if an item exists in discards using dedup key matching."""
+    async def exists_in_discards(self, prompt: str) -> bool:
+        """Check if an item exists in discards using dedup key matching on prompt."""
         data = await self._load_json()
-        candidateKey = build_dedup_key(str(normalized or ''))
+        candidateKey = _prompt_dedup_key(prompt)
         if not candidateKey:
             return False
-        
+
         for existing in data:
-            existingNorm = str(existing.get('normalized') or '')
-            if build_dedup_key(existingNorm) == candidateKey:
+            existingPrompt = str(existing.get('prompt') or '')
+            if _prompt_dedup_key(existingPrompt) == candidateKey:
                 return True
         return False
 
-    async def increment_discarded_item_occurrences(self, normalized: str) -> None:
+    async def increment_discarded_item_occurrences(self, prompt: str) -> None:
         """Increment occurrences for an existing discarded item."""
         async with self._lock:
             data = await self._load_json()
-            candidateKey = build_dedup_key(str(normalized or ''))
+            candidateKey = _prompt_dedup_key(prompt)
             if not candidateKey:
                 return
 
             for existing in data:
-                existingNorm = str(existing.get('normalized') or '')
-                if build_dedup_key(existingNorm) == candidateKey:
+                existingPrompt = str(existing.get('prompt') or '')
+                if _prompt_dedup_key(existingPrompt) == candidateKey:
                     existing['occurrences'] = existing.get('occurrences', 1) + 1
                     await self._save_json(data)
                     return
 
 
 class GlobalDatabaseStore:
-    """Global database backed by Google Cloud Storage with optimistic concurrency."""
+    """Global database backed by Google Cloud Storage with optimistic concurrency.
+
+    New unified format: {prompt, occurrences, craziness?, isSexual?, madeFor?}.
+    """
 
     def __init__(self) -> None:
         self._client = None
-        # Defer environment/config resolution until initialize()
         self._bucketName: Optional[str] = None
         self._objectName: Optional[str] = None
         self._aptPath: Optional[str] = None
-        self._normalizedCache: Set[str] = set()
         self._dedupCache: Set[str] = set()
         self._currentGeneration: Optional[int] = None
         self._initialized = False
@@ -311,7 +307,6 @@ class GlobalDatabaseStore:
     async def initialize(self) -> None:
         if self._initialized:
             return
-        # Resolve config lazily to allow local-only workflows without env set
         self._bucketName = getBucketName()
         self._objectName = getDatabaseObjectName()
         self._aptPath = getAptJsonPath()
@@ -325,26 +320,26 @@ class GlobalDatabaseStore:
         assert self._bucketName is not None
         assert self._objectName is not None
         data, generation = downloadJson(self._client, self._bucketName, self._objectName)
-        self._normalizedCache = {str(item.get('normalized')) for item in data if 'normalized' in item}
-        # Build dedup cache from normalized values
+        # Build dedup cache from prompt field
         self._dedupCache = set()
         for item in data:
-            normVal = str(item.get('normalized') or '')
-            if normVal:
-                self._dedupCache.add(build_dedup_key(normVal))
+            promptVal = str(item.get('prompt') or '')
+            if promptVal:
+                key = _prompt_dedup_key(promptVal)
+                if key:
+                    self._dedupCache.add(key)
         self._currentGeneration = generation
 
-    async def exists_in_database(self, normalized: str) -> bool:
+    async def exists_in_database(self, prompt: str) -> bool:
+        """Check if a prompt exists in the database (dedup key match)."""
         if not self._initialized:
             await self.initialize()
-        # Refresh cache to ensure we check against the latest global DB before
-        # deciding whether to surface an item to the user.
         await self._refresh_cache()
-        # Use dedup key comparison (including possible empty key) to ignore specified words
-        candidateKey = build_dedup_key(str(normalized or ''))
+        candidateKey = _prompt_dedup_key(prompt)
         return candidateKey in self._dedupCache
 
     async def add_to_database(self, item: Dict[str, Any], maxRetries: int = 5) -> None:
+        """Add item to database. Expects {prompt, occurrences, ...}."""
         if not self._initialized:
             await self.initialize()
         assert self._client is not None
@@ -353,19 +348,14 @@ class GlobalDatabaseStore:
         while True:
             try:
                 data, generation = downloadJson(self._client, self._bucketName, self._objectName)
-                
-                # Migrate existing items without occurrences field
-                self._migrate_items_if_needed(data)
-                
-                normalizedValue = str(item.get('normalized') or '')
+
+                promptValue = str(item.get('prompt') or '')
                 # Check for duplicates and increment occurrences if found
-                if normalizedValue:
-                    candidateKey = build_dedup_key(normalizedValue)
-                    # Compute against current data without requiring full cache refresh
+                if promptValue:
+                    candidateKey = _prompt_dedup_key(promptValue)
                     for d in data:
-                        existingNorm = str(d.get('normalized') or '')
-                        if build_dedup_key(existingNorm) == candidateKey:
-                            # Increment occurrences of existing item
+                        existingPrompt = str(d.get('prompt') or '')
+                        if _prompt_dedup_key(existingPrompt) == candidateKey:
                             d['occurrences'] = d.get('occurrences', 1) + 1
                             uploadJsonWithPreconditions(
                                 self._client,
@@ -374,16 +364,14 @@ class GlobalDatabaseStore:
                                 data,
                                 generation,
                             )
-                            # Update caches and return early
-                            self._normalizedCache.add(normalizedValue)
                             self._dedupCache.add(candidateKey)
                             await self._refresh_cache()
                             return
-                
+
                 # Ensure item has occurrences field
                 if 'occurrences' not in item:
                     item['occurrences'] = 1
-                    
+
                 data.append(item)
                 uploadJsonWithPreconditions(
                     self._client,
@@ -392,9 +380,8 @@ class GlobalDatabaseStore:
                     data,
                     generation,
                 )
-                if normalizedValue:
-                    self._normalizedCache.add(normalizedValue)
-                    candidateKey = build_dedup_key(normalizedValue)
+                if promptValue:
+                    candidateKey = _prompt_dedup_key(promptValue)
                     if candidateKey:
                         self._dedupCache.add(candidateKey)
                 await self._refresh_cache()
@@ -406,35 +393,25 @@ class GlobalDatabaseStore:
                 await asyncio.sleep(backoffSeconds)
                 backoffSeconds = min(backoffSeconds * 2, 2.0)
 
-    def _migrate_items_if_needed(self, data: List[Dict[str, Any]]) -> None:
-        """Add occurrences field to items that don't have it."""
-        for item in data:
-            if 'occurrences' not in item:
-                item['occurrences'] = 1
-
-    async def increment_database_item_occurrences(self, normalized: str, maxRetries: int = 5) -> None:
-        """Increment occurrences for an existing database item."""
+    async def increment_database_item_occurrences(self, prompt: str, maxRetries: int = 5) -> None:
+        """Increment occurrences for an existing database item found by prompt."""
         if not self._initialized:
             await self.initialize()
         assert self._client is not None
-        
+
         attempt = 0
         backoffSeconds = 0.2
         while True:
             try:
                 data, generation = downloadJson(self._client, self._bucketName, self._objectName)
-                
-                # Migrate existing items without occurrences field
-                self._migrate_items_if_needed(data)
-                
-                candidateKey = build_dedup_key(str(normalized or ''))
+
+                candidateKey = _prompt_dedup_key(prompt)
                 if not candidateKey:
                     return
 
-                # Find and increment the matching item
                 for item in data:
-                    existingNorm = str(item.get('normalized') or '')
-                    if build_dedup_key(existingNorm) == candidateKey:
+                    existingPrompt = str(item.get('prompt') or '')
+                    if _prompt_dedup_key(existingPrompt) == candidateKey:
                         item['occurrences'] = item.get('occurrences', 1) + 1
                         uploadJsonWithPreconditions(
                             self._client,
@@ -445,10 +422,9 @@ class GlobalDatabaseStore:
                         )
                         await self._refresh_cache()
                         return
-                
-                # Item not found, nothing to increment
+
                 return
-                
+
             except Exception:
                 attempt += 1
                 if attempt > maxRetries:
@@ -456,24 +432,22 @@ class GlobalDatabaseStore:
                 await asyncio.sleep(backoffSeconds)
                 backoffSeconds = min(backoffSeconds * 2, 2.0)
 
-    async def remove_from_database_by_normalized(self, normalizedValues: List[str], maxRetries: int = 5) -> int:
-        """Remove items from the global DB matching the provided normalized values.
+    async def remove_from_database_by_prompt(self, promptValues: List[str], maxRetries: int = 5) -> int:
+        """Remove items from the global DB matching the provided prompt values.
 
-        Removal is based on the dedup key computed from each normalized value,
-        ensuring that logically equivalent entries are removed consistently.
-
+        Matching uses dedup keys computed from each prompt value.
         Returns the count of removed items.
         """
         if not self._initialized:
             await self.initialize()
         assert self._client is not None
-        # Build set of dedup keys to remove
+
         candidateKeys: Set[str] = set()
-        for norm in normalizedValues:
-            normStr = str(norm or "").strip()
-            if not normStr:
+        for prompt in promptValues:
+            promptStr = str(prompt or "").strip()
+            if not promptStr:
                 continue
-            key = build_dedup_key(normStr)
+            key = _prompt_dedup_key(promptStr)
             if key:
                 candidateKeys.add(key)
 
@@ -485,19 +459,17 @@ class GlobalDatabaseStore:
         while True:
             try:
                 data, generation = downloadJson(self._client, self._bucketName, self._objectName)
-                # Partition items into keep/remove by dedup key
                 toKeep: List[Dict[str, Any]] = []
                 removedCount = 0
                 for item in data:
-                    normVal = str(item.get('normalized') or '')
-                    key = build_dedup_key(normVal) if normVal else ''
+                    promptVal = str(item.get('prompt') or '')
+                    key = _prompt_dedup_key(promptVal) if promptVal else ''
                     if key and key in candidateKeys:
                         removedCount += 1
                     else:
                         toKeep.append(item)
 
                 if removedCount == 0:
-                    # Nothing to do
                     await self._refresh_cache()
                     return 0
 
@@ -508,9 +480,58 @@ class GlobalDatabaseStore:
                     toKeep,
                     generation,
                 )
-                # Refresh caches after successful write
                 await self._refresh_cache()
                 return removedCount
+            except Exception:
+                attempt += 1
+                if attempt > maxRetries:
+                    raise
+                await asyncio.sleep(backoffSeconds)
+                backoffSeconds = min(backoffSeconds * 2, 2.0)
+
+    async def update_item_parametrics(self, prompt: str, parametrics: Dict[str, Any], maxRetries: int = 5) -> bool:
+        """Update parametric fields (craziness, isSexual, madeFor) for an entry matched by prompt.
+
+        Returns True if the item was found and updated, False otherwise.
+        """
+        if not self._initialized:
+            await self.initialize()
+        assert self._client is not None
+
+        candidateKey = _prompt_dedup_key(prompt)
+        if not candidateKey:
+            return False
+
+        attempt = 0
+        backoffSeconds = 0.2
+        while True:
+            try:
+                data, generation = downloadJson(self._client, self._bucketName, self._objectName)
+
+                found = False
+                for item in data:
+                    existingPrompt = str(item.get('prompt') or '')
+                    if _prompt_dedup_key(existingPrompt) == candidateKey:
+                        # Merge parametric fields
+                        for key in ('craziness', 'isSexual', 'madeFor'):
+                            if key in parametrics:
+                                item[key] = parametrics[key]
+                        found = True
+                        break
+
+                if not found:
+                    return False
+
+                uploadJsonWithPreconditions(
+                    self._client,
+                    self._bucketName,
+                    self._objectName,
+                    data,
+                    generation,
+                )
+                await self._refresh_cache()
+                return True
+
             except Exception:
                 attempt += 1
                 if attempt > maxRetries:
@@ -527,11 +548,11 @@ class DatabaseManager:
         self.globalStore = GlobalDatabaseStore()
         self.discardsStore = DiscardedItemsStore()
 
-    async def exists_in_database(self, normalized: str) -> bool:
+    async def exists_in_database(self, prompt: str) -> bool:
         """Check if item exists in global database, discards, or user selection."""
-        exists_in_global = await self.globalStore.exists_in_database(normalized)
-        exists_in_discards = await self.discardsStore.exists_in_discards(normalized)
-        exists_in_user_selection = await self.userSelection.exists_in_user_selection(normalized)
+        exists_in_global = await self.globalStore.exists_in_database(prompt)
+        exists_in_discards = await self.discardsStore.exists_in_discards(prompt)
+        exists_in_user_selection = await self.userSelection.exists_in_user_selection(prompt)
         return exists_in_global or exists_in_discards or exists_in_user_selection
 
     async def add_to_user_selection(self, item: Dict[str, Any]) -> None:
@@ -543,18 +564,22 @@ class DatabaseManager:
     async def add_to_discards(self, item: Dict[str, Any]) -> None:
         await self.discardsStore.add_to_discards(item)
 
-    async def remove_from_global_database_by_normalized(self, normalizedValues: List[str]) -> int:
-        return await self.globalStore.remove_from_database_by_normalized(normalizedValues)
+    async def remove_from_global_database_by_prompt(self, promptValues: List[str]) -> int:
+        return await self.globalStore.remove_from_database_by_prompt(promptValues)
 
-    async def increment_occurrence_count(self, normalized: str) -> None:
+    async def increment_occurrence_count(self, prompt: str) -> None:
         """Increment occurrence count for existing items in database or discards."""
-        exists_in_global = await self.globalStore.exists_in_database(normalized)
+        exists_in_global = await self.globalStore.exists_in_database(prompt)
         if exists_in_global:
-            await self.globalStore.increment_database_item_occurrences(normalized)
+            await self.globalStore.increment_database_item_occurrences(prompt)
         else:
-            exists_in_discards = await self.discardsStore.exists_in_discards(normalized)
+            exists_in_discards = await self.discardsStore.exists_in_discards(prompt)
             if exists_in_discards:
-                await self.discardsStore.increment_discarded_item_occurrences(normalized)
+                await self.discardsStore.increment_discarded_item_occurrences(prompt)
+
+    async def update_item_parametrics(self, prompt: str, parametrics: Dict[str, Any]) -> bool:
+        """Update parametric fields for a database entry."""
+        return await self.globalStore.update_item_parametrics(prompt, parametrics)
 
     async def pop_user_selection_item(self) -> Optional[Dict[str, Any]]:
         return await self.userSelection.pop_user_selection_item()

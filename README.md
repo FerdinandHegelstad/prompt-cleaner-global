@@ -67,15 +67,25 @@ bucket_name = "unfiltered_database"
 
 ## Data Structure
 
-- `gs://unfiltered_database/DATABASE.json`: Global cleaned prompts database
-- `gs://unfiltered_database/USER_SELECTION.json`: User selection queue
-- `gs://unfiltered_database/raw_stripped.txt`: Raw prompts for processing
+All data is stored in Google Cloud Storage as JSON/text files:
+
+- `DATABASE.json`: Unified store for all prompts with parametric data
+  - Format: `{prompt, occurrences, craziness?, isSexual?, madeFor?}`
+  - `prompt` is the unique identifier (cleaned text)
+  - Parametric fields are added by LLM parameterization
+- `USER_SELECTION.json`: Queue of items awaiting human review
+  - Format: `{prompt}`
+- `DISCARDS.json`: Rejected prompts (kept to avoid re-processing)
+  - Format: `{prompt, occurrences}`
+- `raw_stripped.txt`: Raw unprocessed prompts
+- `REMOVE_LINES.txt`: Filter list for content removal
 
 ## Usage
 
-1. **Global Database Tab**: View and manage all cleaned prompts
-2. **User Selection Tab**: Review and approve/reject prompts for the global database
-3. **Prompt Distribution Tab**: Analyze prompt length statistics
+1. **Database Tab**: View and manage all prompts with occurrence counts
+2. **Selection Tab**: Review and approve/reject prompts for the global database
+3. **Input Tab**: Upload raw content and manage filter lists
+4. **Parametrics Tab**: View all entries, run LLM parameterization, edit parametric fields
 
 ## Contributing
 

@@ -1,19 +1,25 @@
-"""Database tab UI implementation."""
+"""Database tab UI implementation.
+
+Unified view: database entries with parametric columns, parameterization
+runner, clear-all-parametrics, and discards section.
+"""
 
 import streamlit as st
 from typing import List, Dict, Any
 import pandas as pd
 
 from database import DatabaseManager
+from cloud_storage import downloadJson, uploadJsonWithPreconditions
 from ui.components.common import UIHelpers
 from ui.components.metrics import MetricsDisplay
 from ui.components.tables import TableComponents
 from ui.services.data_service import DataService, run_async
+from ui.services.parametrics_service import ParametricsService
 from ui.services.session_service import SessionService
 
 
 class DatabaseTab:
-    """Complete database tab functionality."""
+    """Complete database tab functionality with integrated parametrics."""
     
     def __init__(self):
         self.metrics = MetricsDisplay()
@@ -22,21 +28,112 @@ class DatabaseTab:
     
     def render(self) -> None:
         """Render the complete database tab."""
-        # Render metrics
+        # Render top-level metrics
         self.metrics.render_four_column_metrics()
         
         # Render load button and handle action
         if self.metrics.render_load_button():
             self.metrics.handle_load_action()
         
-        # Render database section
+        # Action buttons row: Clear All Parametrics + Run Parameterization
+        self._render_action_buttons()
+        
+        # Render database section (unified table with parametric columns)
         self._render_database_section()
         
         # Render discards section
         self._render_discards_section()
     
+    # ------------------------------------------------------------------
+    # Action buttons
+    # ------------------------------------------------------------------
+
+    def _render_action_buttons(self) -> None:
+        """Render parameterization controls."""
+        col1, col2, col3 = st.columns([1, 1, 2])
+        
+        with col1:
+            if st.button("Clear All Parametrics", use_container_width=True, type="secondary"):
+                self._handle_clear_all_action()
+        
+        with col2:
+            num_items = st.number_input(
+                "Items to parameterize",
+                min_value=1,
+                max_value=2000,
+                value=5,
+                step=1,
+                label_visibility="collapsed",
+            )
+        
+        with col3:
+            st.write("")  # vertical alignment spacer
+            if st.button("Run Parameterization", type="primary", use_container_width=True):
+                self._handle_parameterization_run(num_items)
+
+    def _handle_clear_all_action(self) -> None:
+        """Clear craziness/isSexual/madeFor from all entries (keeps entries)."""
+        try:
+            parametrics_service = ParametricsService()
+            all_entries = parametrics_service.load_all_database_entries()
+            parameterized_count = sum(1 for e in all_entries if "craziness" in e)
+            
+            if parameterized_count == 0:
+                self.ui_helpers.show_info_message("No entries have parametric fields to clear.")
+                return
+            
+            if st.session_state.get("parametrics_clear_all_confirmed", False):
+                with self.ui_helpers.with_spinner("Clearing all parametric fields…"):
+                    cleared = parametrics_service.clear_all_parametric_fields()
+                    st.session_state.global_records = DataService.load_global_database()
+                    st.session_state.parametrics_clear_all_confirmed = False
+                    self._invalidate_df_cache()
+                    self.ui_helpers.show_success_message(
+                        f"Cleared parametric fields from {cleared} entries (entries themselves kept)."
+                    )
+            else:
+                st.session_state.parametrics_clear_all_confirmed = True
+                self.ui_helpers.show_warning_message(
+                    f"About to clear parametric fields from {parameterized_count} entries. Click again to confirm."
+                )
+        except Exception as e:
+            st.session_state.parametrics_clear_all_confirmed = False
+            self.ui_helpers.show_error_message(f"Failed to clear parametrics: {str(e)}")
+
+    def _handle_parameterization_run(self, num_items: int) -> None:
+        """Run the LLM parameterization subprocess."""
+        try:
+            import subprocess
+            import sys
+
+            with self.ui_helpers.with_spinner(f"Running parameterization for {num_items} items..."):
+                result = subprocess.run(
+                    [sys.executable, "llm_parameterization.py", str(num_items)],
+                    capture_output=True,
+                    text=True,
+                    cwd=".",
+                )
+            
+            if result.returncode == 0:
+                st.session_state.global_records = DataService.load_global_database()
+                self._invalidate_df_cache()
+                st.rerun()
+            else:
+                st.error(f"Parameterization failed with error code {result.returncode}")
+                if result.stderr:
+                    st.error(f"Error details: {result.stderr}")
+                if result.stdout:
+                    st.text("Output:")
+                    st.text(result.stdout)
+        except Exception as e:
+            st.error(f"Failed to run parameterization: {str(e)}")
+
+    # ------------------------------------------------------------------
+    # Main database table
+    # ------------------------------------------------------------------
+
     def _render_database_section(self) -> None:
-        """Render the main database table section."""
+        """Render the main database table section with all columns."""
         records = SessionService.get_global_records()
         
         if not self.ui_helpers.show_info_or_data(
@@ -45,6 +142,9 @@ class DatabaseTab:
             "Click Load to view the global database."
         ):
             return
+        
+        # Parametrics-specific metrics row
+        self.metrics.render_parametrics_metrics(records)
         
         # Initialize original dataframe state for change detection
         if "db_original_df" not in st.session_state or st.session_state.get("db_records_hash") != hash(str(records)):
@@ -58,99 +158,143 @@ class DatabaseTab:
         # Create and display editable table
         edited_df = self.tables.render_editable_table(df_editor, "global_db_editor")
 
-        # Auto-save any changes detected
+        # Auto-save any changes detected (prompt + parametric fields)
         self._handle_autosave_changes(edited_df, st.session_state.db_original_df, st.session_state.db_records)
 
-        # Handle delete functionality
-        if self.tables.render_delete_button(disabled=SessionService.is_writing()):
-            self._handle_delete_action(edited_df, st.session_state.db_records)
+        # Handle discard functionality
+        if self.tables.render_discard_button(disabled=SessionService.is_writing()):
+            self._handle_discard_action(edited_df, st.session_state.db_records)
+
+    # ------------------------------------------------------------------
+    # Autosave: detects prompt AND parametric field changes
+    # ------------------------------------------------------------------
 
     def _handle_autosave_changes(self, edited_df: pd.DataFrame, original_df: pd.DataFrame, records: List[Dict[str, Any]]) -> None:
-        """Detect and automatically save any changes made to the cleaned column."""
-        # Check if there are any changes
+        """Detect and save changes to prompt text or parametric fields."""
         if edited_df.equals(original_df):
             return
         
-        # Prevent re-saving if we just saved (check session state flag)
         if st.session_state.get("db_just_saved", False):
             st.session_state.db_just_saved = False
             return
         
-        # Find rows where cleaned text has changed
-        changes_detected = False
-        items_to_save = []
+        prompt_changes: List[tuple] = []      # (index, original_record, new_prompt)
+        parametric_changes: List[tuple] = []   # (index, original_record, prompt, craziness, isSexual, madeFor)
         
         for i in range(len(edited_df)):
-            original_cleaned = str(original_df.iloc[i]["cleaned"]).strip()
-            edited_cleaned = str(edited_df.iloc[i]["cleaned"]).strip()
+            if i >= len(records):
+                break
             
-            if original_cleaned != edited_cleaned:
-                changes_detected = True
-                if i < len(records):
-                    items_to_save.append((i, records[i], edited_cleaned))
+            orig_prompt = str(original_df.iloc[i]["prompt"]).strip()
+            edit_prompt = str(edited_df.iloc[i]["prompt"]).strip()
+            
+            # Check prompt change
+            if orig_prompt != edit_prompt:
+                prompt_changes.append((i, records[i], edit_prompt))
+                continue  # if prompt changed, we re-add the whole entry
+            
+            # Check parametric field changes (NaN-safe comparisons)
+            orig_craziness = original_df.iloc[i]["craziness"]
+            orig_sexual = original_df.iloc[i]["isSexual"]
+            orig_madefor = str(original_df.iloc[i]["madeFor"]).strip()
+            
+            edit_craziness = edited_df.iloc[i]["craziness"]
+            edit_sexual = edited_df.iloc[i]["isSexual"]
+            edit_madefor = str(edited_df.iloc[i]["madeFor"]).strip()
+            
+            orig_c_nan = pd.isna(orig_craziness)
+            edit_c_nan = pd.isna(edit_craziness)
+            craziness_changed = (orig_c_nan != edit_c_nan) or (not orig_c_nan and not edit_c_nan and orig_craziness != edit_craziness)
+            
+            orig_s_nan = pd.isna(orig_sexual)
+            edit_s_nan = pd.isna(edit_sexual)
+            sexual_changed = (orig_s_nan != edit_s_nan) or (not orig_s_nan and not edit_s_nan and bool(orig_sexual) != bool(edit_sexual))
+            
+            madefor_changed = orig_madefor != edit_madefor
+            
+            if craziness_changed or sexual_changed or madefor_changed:
+                parametric_changes.append((i, records[i], orig_prompt, edit_craziness, edit_sexual, edit_madefor))
         
-        if not changes_detected:
+        if not prompt_changes and not parametric_changes:
             return
         
-        # Save all changes
         if SessionService.is_writing():
-            return  # Don't save if already writing
+            return
         
         try:
             SessionService.set_writing(True)
-            
-            from text_utils import normalize
-            
             saved_count = 0
+            
             with self.ui_helpers.with_spinner("Auto-saving changes…"):
-                db = DatabaseManager()
+                # Handle prompt text changes (remove + re-add)
+                if prompt_changes:
+                    db = DatabaseManager()
+                    for _index, original_record, new_prompt_text in prompt_changes:
+                        if not new_prompt_text or not new_prompt_text.strip():
+                            continue
+                        new_item = {
+                            "prompt": new_prompt_text,
+                            "occurrences": original_record.get("occurrences", 1),
+                        }
+                        for field in ("craziness", "isSexual", "madeFor"):
+                            if field in original_record:
+                                new_item[field] = original_record[field]
+                        old_prompt = str(original_record.get("prompt") or "").strip()
+                        if old_prompt:
+                            run_async(db.remove_from_global_database_by_prompt([old_prompt]))
+                        run_async(db.add_to_global_database(new_item))
+                        saved_count += 1
                 
-                for index, original_record, new_cleaned_text in items_to_save:
-                    if not new_cleaned_text or not new_cleaned_text.strip():
-                        continue  # Skip empty edits
+                # Handle parametric field changes (in-place update)
+                if parametric_changes:
+                    parametrics_service = ParametricsService()
+                    client = parametrics_service._get_client()
+                    bucket_name = parametrics_service._bucket_name
+                    object_name = parametrics_service._object_name
                     
-                    # Normalize the new text
-                    normalized_text = normalize(new_cleaned_text).strip()
-                    if not normalized_text:
-                        continue  # Skip if normalization results in empty
+                    current_data, generation = downloadJson(client, bucket_name, object_name)
+                    if not isinstance(current_data, list):
+                        current_data = []
                     
-                    # Create the new item
-                    new_item = {
-                        "default": new_cleaned_text,
-                        "cleaned": new_cleaned_text,
-                        "normalized": normalized_text,
-                        "occurrences": original_record.get("occurrences", 1)
-                    }
+                    for _index, _original_record, prompt, new_craziness, new_sexual, new_madefor in parametric_changes:
+                        for item in current_data:
+                            if str(item.get("prompt", "")).strip() == prompt:
+                                if not pd.isna(new_craziness):
+                                    item["craziness"] = int(new_craziness)
+                                if not pd.isna(new_sexual):
+                                    item["isSexual"] = bool(new_sexual)
+                                if new_madefor:
+                                    item["madeFor"] = str(new_madefor).strip()
+                                saved_count += 1
+                                break
                     
-                    # Remove the old item
-                    old_normalized = str(original_record.get("normalized") or "").strip()
-                    if old_normalized:
-                        run_async(db.remove_from_global_database_by_normalized([old_normalized]))
-                    
-                    # Add the new item
-                    run_async(db.add_to_global_database(new_item))
-                    saved_count += 1
+                    if parametric_changes:
+                        uploadJsonWithPreconditions(
+                            client=client,
+                            bucketName=bucket_name,
+                            objectName=object_name,
+                            data=current_data,
+                            ifGenerationMatch=generation,
+                        )
             
             SessionService.set_writing(False)
             
             if saved_count > 0:
-                # Set flag to prevent re-saving on next render
                 st.session_state.db_just_saved = True
-                # Reload data to get fresh state
                 st.session_state.global_records = DataService.load_global_database()
-                # Update records hash to trigger refresh of original_df on next render
                 st.session_state.db_records_hash = hash(str(st.session_state.global_records))
                 st.session_state.db_records = st.session_state.global_records.copy()
-                # Clear original_df so it gets recreated from fresh data
-                if "db_original_df" in st.session_state:
-                    del st.session_state.db_original_df
-                # Show success message
-                st.success(f"✅ Auto-saved {saved_count} change(s)!")
+                self._invalidate_df_cache()
+                st.success(f"Auto-saved {saved_count} change(s)!")
                 st.rerun()
                 
         except Exception as e:
             SessionService.set_writing(False)
             st.error(f"Failed to auto-save changes: {str(e)}")
+
+    # ------------------------------------------------------------------
+    # Discards
+    # ------------------------------------------------------------------
 
     def _render_discards_section(self) -> None:
         """Render the discards table section."""
@@ -164,35 +308,64 @@ class DatabaseTab:
         ):
             return
         
-        # Create and display read-only table
         discards_df = self.tables.create_readonly_dataframe(discards_records)
         self.tables.render_readonly_table(discards_df, height=400, title="Discards")
     
-    def _handle_delete_action(self, edited_df, records: List[Dict[str, Any]]) -> None:
-        """Handle deletion of selected items."""
-        selected_normalized = self.tables.get_selected_items(edited_df, records)
+    # ------------------------------------------------------------------
+    # Discard (move from database to discards)
+    # ------------------------------------------------------------------
+
+    def _handle_discard_action(self, edited_df, records: List[Dict[str, Any]]) -> None:
+        """Move selected items from the database to discards."""
+        selected_prompts = self.tables.get_selected_items(edited_df, records)
         
-        if not selected_normalized:
-            self.ui_helpers.show_warning_message("No rows selected for deletion.")
+        if not selected_prompts:
+            self.ui_helpers.show_warning_message("No rows selected.")
             return
+        
+        # Build a lookup of full records so we preserve occurrences in discards
+        selected_set = set(selected_prompts)
+        items_to_discard = [
+            r for r in records
+            if str(r.get("prompt") or "").strip() in selected_set
+        ]
         
         try:
             SessionService.set_writing(True)
             
-            with self.ui_helpers.with_spinner("Deleting from Cloud DB…"):
+            with self.ui_helpers.with_spinner("Moving to discards…"):
                 db = DatabaseManager()
+                
+                # Add each item to discards first
+                for item in items_to_discard:
+                    run_async(db.add_to_discards({
+                        "prompt": str(item.get("prompt") or "").strip(),
+                        "occurrences": item.get("occurrences", 1),
+                    }))
+                
+                # Then remove from the main database
                 removed = run_async(
-                    db.remove_from_global_database_by_normalized(selected_normalized)
+                    db.remove_from_global_database_by_prompt(selected_prompts)
                 )
             
             SessionService.set_writing(False)
             
-            # Reload data and show success
             st.session_state.global_records = DataService.load_global_database()
+            self._invalidate_df_cache()
             self.ui_helpers.show_success_message(
-                f"Deleted {removed} item(s) from the global database."
+                f"Moved {removed} item(s) to discards."
             )
             
         except Exception as e:
             SessionService.set_writing(False)
-            self.ui_helpers.show_error_message(f"Failed to delete selected rows: {str(e)}")
+            self.ui_helpers.show_error_message(f"Failed to move selected rows to discards: {str(e)}")
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _invalidate_df_cache() -> None:
+        """Remove cached dataframe state so it rebuilds on next render."""
+        if "db_original_df" in st.session_state:
+            del st.session_state["db_original_df"]

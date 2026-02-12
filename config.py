@@ -1,4 +1,5 @@
-#!config.py
+"""Application configuration: GCS bucket names, API keys, and environment settings."""
+
 import os
 from typing import Optional
 
@@ -87,16 +88,6 @@ def getDiscardsObjectName() -> str:
     """
     objectName: Optional[str] = os.getenv("GCS_DISCARDS_OBJECT")
     return objectName or "DISCARDS.json"
-
-
-def getParametricsObjectName() -> str:
-    """Returns the object name for the PARAMETRICS.json file within the bucket.
-
-    Defaults to 'PARAMETRICS.json' at the bucket root. Can be overridden via
-    the environment variable GCS_PARAMETRICS_OBJECT.
-    """
-    objectName: Optional[str] = os.getenv("GCS_PARAMETRICS_OBJECT")
-    return objectName or "PARAMETRICS.json"
 
 
 def getRemoveLinesObjectName() -> str:

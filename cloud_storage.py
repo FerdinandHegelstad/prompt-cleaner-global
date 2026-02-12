@@ -1,4 +1,5 @@
-#!cloud_storage.py
+"""Google Cloud Storage abstraction: download/upload JSON and text files with optimistic concurrency."""
+
 import json
 from typing import Any, Dict, List, Optional, Tuple
 

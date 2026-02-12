@@ -5,7 +5,7 @@ This directory contains all prompt templates and configurations used throughout 
 ## Organization
 
 - `clean.prompt` - Prompt template for cleaning/filtering prompts
-- `paramaterize.prompt` - Prompt template for parameterization
+- `parameterize.prompt` - Prompt template for parameterization
 - Add new prompt files here as needed
 
 ## Usage

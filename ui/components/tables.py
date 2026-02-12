@@ -10,16 +10,21 @@ class TableComponents:
     
     @staticmethod
     def create_editor_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
-        """Build a dataframe with a selectable column for editing/deletion."""
+        """Build a dataframe with all columns for editing/deletion."""
         rows: List[Dict[str, Any]] = []
         for r in records:
             rows.append({
                 "selected": False,
-                "cleaned": str(r.get("cleaned") or "").strip(),
+                "prompt": str(r.get("prompt") or "").strip(),
                 "occurrences": r.get("occurrences", 1),
+                "craziness": r.get("craziness", None),
+                "isSexual": r.get("isSexual", None),
+                "madeFor": str(r.get("madeFor") or "").strip(),
             })
         df = pd.DataFrame(rows)
-        return df[["selected", "cleaned", "occurrences"]] if not df.empty else df
+        if df.empty:
+            return df
+        return df[["selected", "prompt", "occurrences", "craziness", "isSexual", "madeFor"]]
     
     @staticmethod
     def create_readonly_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -27,7 +32,7 @@ class TableComponents:
         rows: List[Dict[str, Any]] = []
         for r in records:
             rows.append({
-                "cleaned": str(r.get("cleaned") or "").strip(),
+                "prompt": str(r.get("prompt") or "").strip(),
                 "occurrences": r.get("occurrences", 1),
             })
         return pd.DataFrame(rows)
@@ -50,18 +55,38 @@ class TableComponents:
             column_config={
                 "selected": st.column_config.CheckboxColumn(
                     "selected",
-                    help="Check rows you want to delete",
+                    help="Select rows to move to discards",
                     default=False,
                 ),
-                "cleaned": st.column_config.TextColumn(
-                    "cleaned",
+                "prompt": st.column_config.TextColumn(
+                    "Prompt",
                     help="Click to edit this text directly in the table",
+                    width="large",
                     disabled=False,
                 ),
                 "occurrences": st.column_config.NumberColumn(
-                    "occurrences",
+                    "Occurrences",
                     disabled=True,
                     help="Number of times this item has been encountered",
+                ),
+                "craziness": st.column_config.NumberColumn(
+                    "Craziness",
+                    help="Level of craziness (1-4)",
+                    min_value=1,
+                    max_value=4,
+                    step=1,
+                    format="%d",
+                    disabled=False,
+                ),
+                "isSexual": st.column_config.CheckboxColumn(
+                    "Sexual",
+                    help="Whether the prompt has sexual content",
+                    disabled=False,
+                ),
+                "madeFor": st.column_config.TextColumn(
+                    "Made For",
+                    help="Target audience (boys/girls/both)",
+                    disabled=False,
                 ),
             },
         )
@@ -77,22 +102,22 @@ class TableComponents:
             height=height,
             hide_index=True,
             column_config={
-                "cleaned": st.column_config.TextColumn("Cleaned Text"),
+                "prompt": st.column_config.TextColumn("Prompt"),
                 "occurrences": st.column_config.NumberColumn(
                     "Occurrences",
-                    help=f"Number of times this item was processed"
+                    help="Number of times this item was processed"
                 ),
             },
         )
     
     @staticmethod
-    def render_delete_button(disabled: bool = False) -> bool:
-        """Render delete button and return True if clicked."""
-        delete_col, _ = st.columns([1, 5])
-        with delete_col:
+    def render_discard_button(disabled: bool = False) -> bool:
+        """Render discard button and return True if clicked."""
+        col, _ = st.columns([1, 5])
+        with col:
             return st.button(
-                "Delete selected",
-                key="database_delete_button",
+                "Move to discards",
+                key="database_discard_button",
                 type="secondary",
                 width="stretch",
                 disabled=disabled,
@@ -100,17 +125,17 @@ class TableComponents:
     
     @staticmethod
     def get_selected_items(df: pd.DataFrame, records: List[Dict[str, Any]]) -> List[str]:
-        """Extract normalized values from selected rows."""
+        """Extract prompt values from selected rows."""
         try:
             selected_mask = df["selected"] == True  # noqa: E712
             selected_indices = df[selected_mask].index.tolist()
-            selected_normalized: List[str] = []
+            selected_prompts: List[str] = []
             for idx in selected_indices:
                 if idx < len(records):
-                    norm_val = str(records[idx].get("normalized") or "").strip()
-                    if norm_val:
-                        selected_normalized.append(norm_val)
-            return selected_normalized
+                    prompt_val = str(records[idx].get("prompt") or "").strip()
+                    if prompt_val:
+                        selected_prompts.append(prompt_val)
+            return selected_prompts
         except Exception:
             return []
 
@@ -128,8 +153,8 @@ class BatchReviewComponents:
             discarded = st.checkbox("Discard", key=checkbox_key)
         
         with col2:
-            cleaned_text = str(item.get("cleaned") or "").strip()
-            st.text(cleaned_text or "(empty)")
+            prompt_text = str(item.get("prompt") or "").strip()
+            st.text(prompt_text or "(empty)")
         
         st.markdown("---")
         return discarded

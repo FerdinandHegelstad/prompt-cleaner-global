@@ -1,13 +1,11 @@
 """Selection tab UI implementation."""
 
 import streamlit as st
-from typing import Dict, Any, List
 
 from ui.components.common import UIHelpers, WorkflowMessages
 from ui.components.tables import BatchReviewComponents
 from ui.services.data_service import SelectionService, run_async
 from ui.services.session_service import BatchSessionService
-from text_utils import normalize
 
 
 class SelectionTab:
@@ -124,20 +122,16 @@ class SelectionTab:
             return
 
         try:
-            # Clean and normalize the input
-            cleaned_text = input_text.strip()
-            normalized_text = normalize(cleaned_text).strip()
+            prompt_text = input_text.strip()
 
-            if not normalized_text:
-                st.error("The input text resulted in empty normalized text. Please try different text.")
+            if not prompt_text:
+                st.error("The input text is empty. Please try different text.")
                 return
 
-            # Create the item dictionary
+            # Create the item dictionary with new unified format
             item = {
-                "default": input_text.strip(),
-                "cleaned": cleaned_text,
-                "normalized": normalized_text,
-                "occurrences": 1
+                "prompt": prompt_text,
+                "occurrences": 1,
             }
 
             # Add to global database
@@ -145,8 +139,7 @@ class SelectionTab:
             run_async(db.add_to_global_database(item))
 
             # Clear the input field by rerunning
-            st.success(f"✅ Added to database: {cleaned_text[:50]}{'...' if len(cleaned_text) > 50 else ''}")
-            # Reset manual input so the field is blank on rerun
+            st.success(f"Added to database: {prompt_text[:50]}{'...' if len(prompt_text) > 50 else ''}")
             st.session_state["manual_input"] = ""
             st.rerun()
 

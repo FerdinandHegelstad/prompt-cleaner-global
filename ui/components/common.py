@@ -35,6 +35,11 @@ class UIHelpers:
         st.warning(message)
     
     @staticmethod
+    def show_info_message(message: str) -> None:
+        """Show info message."""
+        st.info(message)
+    
+    @staticmethod
     def with_spinner(message: str):
         """Context manager for spinner display."""
         return st.spinner(message)
