@@ -87,6 +87,10 @@ def normalize(text: str) -> str:
     Returns:
         Normalized text.
     """
+    # IMPORTANT: Do NOT pre-process [PLAYER]/[DRINKS] here.
+    # Brackets are stripped by the regex below, turning them into bare words
+    # "PLAYER"/"DRINKS", which build_dedup_key() then removes. This makes
+    # placeholders invisible to dedup -- which is the correct behavior.
     return re.sub(r'[^\w\s]', '', text)
 
 
@@ -107,7 +111,12 @@ def build_dedup_key(normalized_text: str) -> str:
     if not text:
         return ''
 
-    # Remove the words 'player' and 'drinks' as whole words, case-insensitive.
+    # Remove 'player' and 'drinks' as whole words. This serves two purposes:
+    # 1. normalize() strips brackets from [PLAYER]/[DRINKS], leaving bare words
+    #    "PLAYER"/"DRINKS". Removing them here makes all placeholder variants
+    #    ([PLAYER], [DRINKS], Player, Drinks) invisible to dedup.
+    # 2. The literal words "player" and "drinks" are common filler in a
+    #    drinking-game context and should not cause false dedup misses.
     text = re.sub(r"\b(?:player|drinks)\b", " ", text, flags=re.IGNORECASE)
 
     # Collapse runs of whitespace and trim.
