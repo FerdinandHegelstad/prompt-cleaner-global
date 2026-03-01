@@ -10,7 +10,7 @@ INSTRUCTIONS:
 
 2. Replace "[DRINKS]" placeholder with x sips: {{drinking_level}}
 - Use a good mix of variation:
-    <<DRINKING VARIATION (Choose one that fits grammatically). You don't have to use "slurker" (e.g. "Alle tar 3")
+    <<DRINKING VARIATION (Choose one that fits grammatically). You don't have to use "slurker" or "ta" (e.g. "Alle tar x", or "x til den til venstre for deg")
     - "ta x slurk(er)" / ", drikk(er) x"
     - "tar x slurker"
     - "drikk x"
@@ -20,8 +20,9 @@ INSTRUCTIONS:
     - "må chugge"
     - "shot"
     - "chug">>
+    - x til den til høyre for deg
 - Follow Norwegian grammar rules.
-- Use a mix of written numbers and digits.
+- Use a mix of written numbers and digits. (e.g. 5 or fem)
 - Only replace "[DRINKS]" placeholder, do not add drinks without placeholder (if not mentioned in custom instructions).
 
 3. Adjust relevant prompts based on the custom instructionss, but don't force it if irrelevant.
