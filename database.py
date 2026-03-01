@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from typing import Any, Dict, List, Optional, Set
 
 from cloud_storage import (
@@ -76,28 +77,13 @@ class UserSelectionStore:
         assert self._objectName is not None
 
         jsonText = json.dumps(data, ensure_ascii=False, indent=4)
-
-        attempt = 0
-        maxRetries = 5
-        backoffSeconds = 0.2
-
-        while True:
-            try:
-                uploadTextFile(
-                    self._client,
-                    self._bucketName,
-                    self._objectName,
-                    jsonText,
-                    self._currentGeneration
-                )
-                return
-            except Exception:
-                attempt += 1
-                if attempt > maxRetries:
-                    raise
-                await asyncio.sleep(backoffSeconds)
-                backoffSeconds = min(backoffSeconds * 2, 2.0)
-                await self._load_json()
+        uploadTextFile(
+            self._client,
+            self._bucketName,
+            self._objectName,
+            jsonText,
+            self._currentGeneration
+        )
 
     async def add_to_user_selection(self, item: Dict[str, Any]) -> None:
         """Add an item to user selection. Expects {"prompt": "..."}."""
@@ -207,28 +193,13 @@ class DiscardedItemsStore:
         assert self._objectName is not None
 
         jsonText = json.dumps(data, ensure_ascii=False, indent=4)
-
-        attempt = 0
-        maxRetries = 5
-        backoffSeconds = 0.2
-
-        while True:
-            try:
-                uploadTextFile(
-                    self._client,
-                    self._bucketName,
-                    self._objectName,
-                    jsonText,
-                    self._currentGeneration
-                )
-                return
-            except Exception:
-                attempt += 1
-                if attempt > maxRetries:
-                    raise
-                await asyncio.sleep(backoffSeconds)
-                backoffSeconds = min(backoffSeconds * 2, 2.0)
-                await self._load_json()
+        uploadTextFile(
+            self._client,
+            self._bucketName,
+            self._objectName,
+            jsonText,
+            self._currentGeneration
+        )
 
     async def add_to_discards(self, item: Dict[str, Any]) -> None:
         """Add an item to the discards store. Expects {"prompt": "...", "occurrences": N}."""
@@ -295,6 +266,8 @@ class GlobalDatabaseStore:
     New unified format: {prompt, occurrences, craziness?, isSexual?, madeFor?}.
     """
 
+    _CACHE_TTL_SECONDS = 5.0
+
     def __init__(self) -> None:
         self._client = None
         self._bucketName: Optional[str] = None
@@ -302,6 +275,7 @@ class GlobalDatabaseStore:
         self._aptPath: Optional[str] = None
         self._dedupCache: Set[str] = set()
         self._currentGeneration: Optional[int] = None
+        self._cacheTimestamp: float = 0.0
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -315,12 +289,19 @@ class GlobalDatabaseStore:
         await self._refresh_cache()
         self._initialized = True
 
-    async def _refresh_cache(self) -> None:
+    async def _refresh_cache(self, force: bool = False) -> None:
+        """Rebuild the in-memory dedup cache from GCS.
+
+        Skips the download when the cache is younger than ``_CACHE_TTL_SECONDS``
+        unless *force* is True (used after writes to ensure consistency).
+        """
+        if not force and (time.monotonic() - self._cacheTimestamp) < self._CACHE_TTL_SECONDS:
+            return
+
         assert self._client is not None
         assert self._bucketName is not None
         assert self._objectName is not None
         data, generation = downloadJson(self._client, self._bucketName, self._objectName)
-        # Build dedup cache from prompt field
         self._dedupCache = set()
         for item in data:
             promptVal = str(item.get('prompt') or '')
@@ -329,6 +310,7 @@ class GlobalDatabaseStore:
                 if key:
                     self._dedupCache.add(key)
         self._currentGeneration = generation
+        self._cacheTimestamp = time.monotonic()
 
     async def exists_in_database(self, prompt: str) -> bool:
         """Check if a prompt exists in the database (dedup key match)."""
@@ -365,7 +347,7 @@ class GlobalDatabaseStore:
                                 generation,
                             )
                             self._dedupCache.add(candidateKey)
-                            await self._refresh_cache()
+                            await self._refresh_cache(force=True)
                             return
 
                 # Ensure item has occurrences field
@@ -384,7 +366,7 @@ class GlobalDatabaseStore:
                     candidateKey = _prompt_dedup_key(promptValue)
                     if candidateKey:
                         self._dedupCache.add(candidateKey)
-                await self._refresh_cache()
+                await self._refresh_cache(force=True)
                 return
             except Exception:
                 attempt += 1
@@ -420,7 +402,7 @@ class GlobalDatabaseStore:
                             data,
                             generation,
                         )
-                        await self._refresh_cache()
+                        await self._refresh_cache(force=True)
                         return
 
                 return
@@ -470,7 +452,7 @@ class GlobalDatabaseStore:
                         toKeep.append(item)
 
                 if removedCount == 0:
-                    await self._refresh_cache()
+                    await self._refresh_cache(force=True)
                     return 0
 
                 uploadJsonWithPreconditions(
@@ -480,7 +462,7 @@ class GlobalDatabaseStore:
                     toKeep,
                     generation,
                 )
-                await self._refresh_cache()
+                await self._refresh_cache(force=True)
                 return removedCount
             except Exception:
                 attempt += 1
@@ -529,7 +511,7 @@ class GlobalDatabaseStore:
                     data,
                     generation,
                 )
-                await self._refresh_cache()
+                await self._refresh_cache(force=True)
                 return True
 
             except Exception:

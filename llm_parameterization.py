@@ -28,21 +28,9 @@ from config import (
     getXaiBaseUrl,
     getXaiModel,
 )
+from database import _prompt_dedup_key
 from openai import AsyncOpenAI
 
-
-# JSON Schema for validation
-PARAMETRICS_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "prompt": {"type": "string", "minLength": 1},
-        "craziness": {"type": "integer", "minimum": 1, "maximum": 4},
-        "isSexual": {"type": "boolean"},
-        "madeFor": {"type": "string", "enum": ["boys", "girls"]}
-    },
-    "required": ["prompt", "craziness", "isSexual"],
-    "additionalProperties": False
-}
 
 
 class ParameterizationLLM:
@@ -86,7 +74,7 @@ class ParameterizationLLM:
             Dictionary with parametric data or None if failed
         """
         client = self._get_client()
-        model = "grok-4-fast-reasoning"
+        model = getXaiModel()
         last_exception = None
         
         for attempt in range(max_retries + 1):
@@ -388,14 +376,15 @@ class ParameterizationWorkflow:
                 try:
                     data, generation = downloadJson(client, self.bucket_name, self.database_object)
                     
-                    # Build lookup for quick matching
-                    update_map = {u["prompt"]: u for u in updates}
+                    # Build lookup for quick matching using dedup keys
+                    update_map = {_prompt_dedup_key(u["prompt"]): u for u in updates}
                     
                     updated_count = 0
                     for entry in data:
                         entry_prompt = entry.get("prompt", "").strip()
-                        if entry_prompt in update_map:
-                            upd = update_map[entry_prompt]
+                        entry_key = _prompt_dedup_key(entry_prompt)
+                        if entry_key and entry_key in update_map:
+                            upd = update_map[entry_key]
                             entry["craziness"] = upd["craziness"]
                             entry["isSexual"] = upd["isSexual"]
                             if upd.get("madeFor"):

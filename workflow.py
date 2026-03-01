@@ -15,8 +15,7 @@ from config import getAptJsonPath, getBucketName, getRawStrippedObjectName
 class Workflow:
     """Manages the workflow for processing items."""
 
-    def __init__(self, stripped_file: str, x: int):
-        self.stripped_file = stripped_file
+    def __init__(self, x: int):
         self.x = x
         self.db_manager = DatabaseManager()
         # GCS configuration
@@ -74,7 +73,7 @@ class Workflow:
         content, generation = downloadTextFile(self.client, self.bucket_name, self.object_name)
         self.current_generation = generation
         lines = content.splitlines()
-        items = [line for line in lines if line]
+        items = [line for line in lines if line.strip()]
 
         if len(items) < self.x:
             selected_items = items
@@ -107,10 +106,6 @@ class Workflow:
             Dictionary with success status and message.
         """
         try:
-            print(f"DEBUG: Processing item: {item.raw[:50]}", flush=True)
-            import sys
-            sys.stdout.flush()
-
             # Call LLM to clean the raw text
             cleaned = await call_llm(item.raw)
 
@@ -135,11 +130,7 @@ class Workflow:
                 return {"success": False, "message": "Normalization resulted in empty string"}
 
             # Check for duplicates against Cloud DB, discards, and user selection
-            # The DB layer internally normalizes the prompt for dedup
-            try:
-                exists = await self.db_manager.exists_in_database(item.prompt)
-            except Exception as e:
-                exists = False
+            exists = await self.db_manager.exists_in_database(item.prompt)
 
             if not exists:
                 # Add to user selection for human review
@@ -149,10 +140,8 @@ class Workflow:
                 # Item is duplicate - increment occurrence count
                 try:
                     await self.db_manager.increment_occurrence_count(item.prompt)
-                    print(f"⚠️  Prompt already exists: '{item.raw[:80]}'")
                     return {"success": True, "message": "Item skipped (duplicate, occurrence incremented)"}
                 except Exception as e:
-                    print(f"⚠️  Prompt already exists: '{item.raw[:80]}'")
                     return {"success": True, "message": "Item skipped (duplicate)"}
 
         except Exception as e:
@@ -160,10 +149,9 @@ class Workflow:
             return {"success": False, "message": error_msg}
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python workflow.py <stripped_file> <X>")
+    if len(sys.argv) != 2:
+        print("Usage: python workflow.py <X>")
         sys.exit(1)
-    stripped_file = sys.argv[1]
-    x = int(sys.argv[2])
-    workflow = Workflow(stripped_file, x)
+    x = int(sys.argv[1])
+    workflow = Workflow(x)
     asyncio.run(workflow.run())

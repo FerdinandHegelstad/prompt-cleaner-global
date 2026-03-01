@@ -127,34 +127,48 @@ def build_dedup_key(normalized_text: str) -> str:
 
 
 # Line removal functions (from remove_lines.py)
+def filter_lines_by_blocklist(lines: List[str], blocklist: List[str]) -> List[str]:
+    """Filter lines, removing any that contain a blocklist term as a whole word (case-insensitive).
+
+    Args:
+        lines: The lines to filter.
+        blocklist: Terms to match against. A line is removed if any term
+                   appears as a case-insensitive whole word.
+
+    Returns:
+        Lines that did not match any blocklist term.
+    """
+    if not blocklist:
+        return list(lines)
+
+    blocklist_lower = [term.lower() for term in blocklist]
+    kept: List[str] = []
+    for line in lines:
+        line_lower = line.strip().lower()
+        should_remove = False
+        for term in blocklist_lower:
+            if (f" {term} " in f" {line_lower} " or
+                line_lower.startswith(f"{term} ") or
+                line_lower.endswith(f" {term}") or
+                line_lower == term):
+                should_remove = True
+                break
+        if not should_remove:
+            kept.append(line)
+    return kept
+
+
 def remove_lines_containing(file_path: str, params: list[str]) -> None:
     """
     Removes lines from the file that contain any of the provided params as substrings.
     Modifies the file in place.
     """
     try:
-        # Read all lines
         with open(file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
 
-        # Filter lines: keep if NONE of the params are in the line (case-insensitive whole word check)
-        kept_lines = []
-        for line in lines:
-            line_content_lower = line.strip().lower()  # Lowercase for case-insensitive check
-            should_remove = False
-            for param in params:
-                param_lower = param.lower()
-                # Check if param is a whole word (surrounded by spaces or at start/end)
-                if (f" {param_lower} " in f" {line_content_lower} " or
-                    line_content_lower.startswith(f"{param_lower} ") or
-                    line_content_lower.endswith(f" {param_lower}") or
-                    line_content_lower == param_lower):
-                    should_remove = True
-                    break
-            if not should_remove:
-                kept_lines.append(line)  # Keep original line including newline
+        kept_lines = filter_lines_by_blocklist(lines, params)
 
-        # Write back the kept lines
         with open(file_path, 'w', encoding='utf-8') as f:
             f.writelines(kept_lines)
 

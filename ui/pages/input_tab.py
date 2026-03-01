@@ -7,7 +7,7 @@ from typing import List
 
 from cloud_storage import loadCredentialsFromAptJson, getStorageClient, downloadTextFile, uploadTextFile
 from config import getBucketName, getAptJsonPath, getRawStrippedObjectName, getRemoveLinesObjectName
-from text_utils import strip_file
+from text_utils import strip_file, filter_lines_by_blocklist
 from ui.components.common import UIHelpers
 
 
@@ -212,7 +212,6 @@ class InputTab:
         """Remove lines containing any of the remove strings from raw_stripped.txt."""
         try:
             with self.ui_helpers.with_spinner("Removing lines from raw_stripped.txt..."):
-                # Download current raw_stripped.txt from cloud
                 credentials = loadCredentialsFromAptJson(getAptJsonPath())
                 client = getStorageClient(credentials)
                 bucket_name = getBucketName()
@@ -224,36 +223,13 @@ class InputTab:
                     st.warning("raw_stripped.txt is empty or doesn't exist.")
                     return
                 
-                # Process lines
                 lines = current_content.split('\n')
-                original_count = len(lines)
-                kept_lines = []
+                kept_lines = filter_lines_by_blocklist(lines, remove_strings)
                 
-                for line in lines:
-                    should_remove = False
-                    line_lower = line.lower()
-                    line_stripped = line.strip()
-
-                    # Check if any remove string is contained in the line (case-insensitive)
-                    # OR if the line is identical to any remove string (case-insensitive)
-                    for remove_string in remove_strings:
-                        remove_string_lower = remove_string.lower()
-                        remove_string_stripped = remove_string.strip()
-
-                        # Remove if: 1) contains the string, or 2) is identical to the string
-                        if (remove_string_lower in line_lower or
-                            line_stripped.lower() == remove_string_stripped.lower()):
-                            should_remove = True
-                            break
-
-                    if not should_remove:
-                        kept_lines.append(line)
-                
-                # Upload updated content back to cloud
                 updated_content = '\n'.join(kept_lines)
                 uploadTextFile(client, bucket_name, object_name, updated_content, generation)
                 
-                removed_count = original_count - len(kept_lines)
+                removed_count = len(lines) - len(kept_lines)
                 self.ui_helpers.show_success_message(
                     f"Removed {removed_count} lines from raw_stripped.txt ({len(kept_lines)} lines remaining)"
                 )
@@ -264,51 +240,23 @@ class InputTab:
     def _apply_remove_lines_logic_after_upload(self, client, bucket_name: str, object_name: str) -> dict:
         """Apply remove lines logic after upload and return stats."""
         try:
-            # Get remove strings
             remove_strings = self._load_remove_strings()
             if not remove_strings:
                 return {'removed_count': 0, 'remaining_count': 0}
 
-            # Download current content
             current_content, generation = downloadTextFile(client, bucket_name, object_name)
-
             if not current_content:
                 return {'removed_count': 0, 'remaining_count': 0}
 
-            # Process lines (same logic as _handle_remove_lines)
             lines = current_content.split('\n')
-            original_count = len(lines)
-            kept_lines = []
+            kept_lines = filter_lines_by_blocklist(lines, remove_strings)
 
-            for line in lines:
-                should_remove = False
-                line_lower = line.lower()
-                line_stripped = line.strip()
-
-                # Check if any remove string is contained in the line (case-insensitive)
-                # OR if the line is identical to any remove string (case-insensitive)
-                for remove_string in remove_strings:
-                    remove_string_lower = remove_string.lower()
-                    remove_string_stripped = remove_string.strip()
-
-                    # Remove if: 1) contains the string, or 2) is identical to the string
-                    if (remove_string_lower in line_lower or
-                        line_stripped.lower() == remove_string_stripped.lower()):
-                        should_remove = True
-                        break
-
-                if not should_remove:
-                    kept_lines.append(line)
-
-            # Upload updated content back to cloud
             updated_content = '\n'.join(kept_lines)
             uploadTextFile(client, bucket_name, object_name, updated_content, generation)
 
-            removed_count = original_count - len(kept_lines)
-            return {'removed_count': removed_count, 'remaining_count': len(kept_lines)}
+            return {'removed_count': len(lines) - len(kept_lines), 'remaining_count': len(kept_lines)}
 
         except Exception as e:
-            # If remove logic fails, don't fail the entire upload - just return zero stats
             print(f"Warning: Remove lines logic failed: {str(e)}")
             return {'removed_count': 0, 'remaining_count': 0}
 

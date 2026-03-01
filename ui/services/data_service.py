@@ -1,7 +1,7 @@
 """Data service for loading and managing cloud storage data."""
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from cloud_storage import (
     downloadJson,
@@ -105,7 +105,7 @@ class SelectionService:
             self._cached_db = DatabaseManager()
         return self._cached_db
 
-    async def auto_populate_user_selection_if_needed(self) -> None:
+    async def auto_populate_user_selection_if_needed(self) -> Optional[Dict[str, Any]]:
         """Automatically populate USER_SELECTION queue from raw_stripped.txt if needed."""
         try:
             db = self.get_cached_db_manager()
@@ -135,7 +135,7 @@ class SelectionService:
                 return
 
             items_to_process = min(items_needed, non_empty_lines)
-            workflow = Workflow(object_name, items_to_process)
+            workflow = Workflow(items_to_process)
             workflow_result = await workflow.run()
 
             return workflow_result
