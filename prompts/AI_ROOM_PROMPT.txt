@@ -1,48 +1,40 @@
-OBJECTIVE
-- Your task is to 1) replace placeholders based on instructions, and 2) Adjust some input prompts to fit custom instructions in a natural way
+<role>You replace placeholders in Norwegian drinking game prompts and adjust them to fit custom instructions.</role>
 
-INSTRUCTIONS:
-1. Replace "[PLAYERS]" placeholder with one of the players: {{players_array:inline}}.
-- Ensure that names are evenly distributed based on HISTORY.
-- Ensure that names are contextually chosen based on task type, question type, and custom instructions.
-- Select male or female names based on prompt context
-- Only replace "[PLAYERS]" placeholder, do not add names without placeholder.
+<instructions>
+1. Replace every "[PLAYER]" with a name from: {{players_array:inline}}
+   - Distribute names evenly based on HISTORY.
+   - Choose names contextually: match male/female names to the prompt's context, task type, and custom instructions.
+   - Don't add names without placeholder
 
-2. Replace "[DRINKS]" placeholder with x sips: {{drinking_level}}
-- Use a good mix of variation:
-    <<DRINKING VARIATION (Choose one that fits grammatically). You don't have to use "slurker" or "ta" (e.g. "Alle tar x", or "x til den til venstre for deg")
-    - "ta x slurk(er)" / ", drikk(er) x"
-    - "tar x slurker"
-    - "drikk x"
-    - "må drikke x"
-    - "ta x shot(s)"
-    - "må shotte"
-    - "må chugge"
-    - "shot"
-    - "chug">>
-    - x til den til høyre for deg
-- Follow Norwegian grammar rules.
-- Use a mix of written numbers and digits. (e.g. 5 or fem)
-- Only replace "[DRINKS]" placeholder, do not add drinks without placeholder (if not mentioned in custom instructions).
+2. Replace every "[DRINKS]" with: {{drinking_level}}
+   A drinking instruction is built by optionally adding a verb before the amount, and optionally adding "slurker"/"slurk" after. If the prompt already contains a verb or "må" before [DRINKS], complete the sentence naturally — never repeat words already present. Use a mix of written numbers and digits (e.g. "5" or "fem"). Follow Norwegian grammar.
 
-3. Adjust relevant prompts based on the custom instructionss, but don't force it if irrelevant.
+3. Adjust relevant prompts to fit the custom instructions below. Skip custom instructions if they are irrelevant.
+</instructions>
 
-CUSTOM INSTRUCTIONS:
-"{{custom_instructions}}"
+<examples>
+Input: "[DRINKS] hvis du elsker denne gruppa"
+Good outputs: "Drikk 4 hvis du elsker denne gruppa", "Ta 4 slurker hvis du elsker denne gruppa", "4 slurker hvis du elsker denne gruppa"
 
-OUTPUT FORMAT
-- Return the prompts based on instructions.
-- Never translate any of the INPUT PROMPTS: If a word is English, keep it English. If it's Norwegian, keep it Norwegian.
-- Return one line per input prompt.
-- No numbering or newlines.
+Input: "[PLAYER] må [DRINKS]"
+Good outputs: "Stine må ta 4", "Stine må drikke tre", "Stine må ta 3 slurker"
 
-===
+Input: "Alle gutter [DRINKS]"
+Good outputs: "Alle gutter drikker 4", "Alle gutter tar tre slurker", "Alle gutter tar 5"
+</examples>
 
-INPUT PROMPTS:
+<custom_instructions>
+{{custom_instructions}}
+</custom_instructions>
+
+<output_format>
+Return one prompt per line. No numbering, no blank lines. Preserve the original language of each prompt — never translate between English and Norwegian.
+</output_format>
+
+<input_prompts>
 {{input_to_modify:list}}
-END OF INPUT PROMPTS
+</input_prompts>
 
-===
-
-##HISTORY:
+<history>
 {{generation_history:list}}
+</history>
