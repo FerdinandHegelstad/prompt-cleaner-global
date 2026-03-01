@@ -16,6 +16,7 @@ class TableComponents:
             rows.append({
                 "selected": False,
                 "prompt": str(r.get("prompt") or "").strip(),
+                "preview": str(r.get("preview") or "").strip(),
                 "occurrences": r.get("occurrences", 1),
                 "craziness": r.get("craziness", None),
                 "isSexual": r.get("isSexual", None),
@@ -24,7 +25,7 @@ class TableComponents:
         df = pd.DataFrame(rows)
         if df.empty:
             return df
-        return df[["selected", "prompt", "occurrences", "craziness", "isSexual", "madeFor"]]
+        return df[["selected", "prompt", "preview", "occurrences", "craziness", "isSexual", "madeFor"]]
     
     @staticmethod
     def create_readonly_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -63,6 +64,12 @@ class TableComponents:
                     help="Click to edit this text directly in the table",
                     width="large",
                     disabled=False,
+                ),
+                "preview": st.column_config.TextColumn(
+                    "Preview",
+                    help="LLM-generated preview with placeholders filled in",
+                    width="large",
+                    disabled=True,
                 ),
                 "occurrences": st.column_config.NumberColumn(
                     "Occurrences",

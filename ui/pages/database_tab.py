@@ -49,13 +49,13 @@ class DatabaseTab:
     # ------------------------------------------------------------------
 
     def _render_action_buttons(self) -> None:
-        """Render parameterization controls."""
+        """Render parameterization and preview controls."""
         col1, col2, col3 = st.columns([1, 1, 2])
-        
+
         with col1:
             if st.button("Clear All Parametrics", use_container_width=True, type="secondary"):
                 self._handle_clear_all_action()
-        
+
         with col2:
             num_items = st.number_input(
                 "Items to parameterize",
@@ -65,11 +65,33 @@ class DatabaseTab:
                 step=1,
                 label_visibility="collapsed",
             )
-        
+
         with col3:
             st.write("")  # vertical alignment spacer
             if st.button("Run Parameterization", type="primary", use_container_width=True):
                 self._handle_parameterization_run(num_items)
+
+        # Preview generation row
+        pcol1, pcol2, pcol3 = st.columns([1, 1, 2])
+
+        with pcol1:
+            if st.button("Clear All Previews", use_container_width=True, type="secondary"):
+                self._handle_clear_all_previews()
+
+        with pcol2:
+            num_preview_items = st.number_input(
+                "Items to preview",
+                min_value=1,
+                max_value=5000,
+                value=10,
+                step=5,
+                label_visibility="collapsed",
+            )
+
+        with pcol3:
+            st.write("")  # vertical alignment spacer
+            if st.button("Generate Previews", type="primary", use_container_width=True):
+                self._handle_preview_run(num_preview_items)
 
     def _handle_clear_all_action(self) -> None:
         """Clear craziness/isSexual/madeFor from all entries (keeps entries)."""
@@ -100,31 +122,71 @@ class DatabaseTab:
             st.session_state.parametrics_clear_all_confirmed = False
             self.ui_helpers.show_error_message(f"Failed to clear parametrics: {str(e)}")
 
+    def _handle_clear_all_previews(self) -> None:
+        """Clear the 'preview' field from all database entries."""
+        try:
+            parametrics_service = ParametricsService()
+            all_entries = parametrics_service.load_all_database_entries()
+            preview_count = sum(1 for e in all_entries if "preview" in e)
+
+            if preview_count == 0:
+                self.ui_helpers.show_info_message("No entries have previews to clear.")
+                return
+
+            if st.session_state.get("preview_clear_all_confirmed", False):
+                with self.ui_helpers.with_spinner("Clearing all preview fields…"):
+                    cleared = parametrics_service.clear_all_preview_fields()
+                    st.session_state.global_records = DataService.load_global_database()
+                    st.session_state.preview_clear_all_confirmed = False
+                    self._invalidate_df_cache()
+                    self.ui_helpers.show_success_message(
+                        f"Cleared previews from {cleared} entries."
+                    )
+            else:
+                st.session_state.preview_clear_all_confirmed = True
+                self.ui_helpers.show_warning_message(
+                    f"About to clear previews from {preview_count} entries. Click again to confirm."
+                )
+        except Exception as e:
+            st.session_state.preview_clear_all_confirmed = False
+            self.ui_helpers.show_error_message(f"Failed to clear previews: {str(e)}")
+
+    def _run_llm_script(self, script: str, num_items: int, spinner_label: str) -> None:
+        """Run an LLM subprocess script and reload the database on success."""
+        import subprocess
+        import sys
+
+        with self.ui_helpers.with_spinner(spinner_label):
+            result = subprocess.run(
+                [sys.executable, script, str(num_items)],
+                capture_output=True,
+                text=True,
+                cwd=".",
+            )
+
+        if result.returncode == 0:
+            st.session_state.global_records = DataService.load_global_database()
+            self._invalidate_df_cache()
+            st.rerun()
+        else:
+            st.error(f"{script} failed with error code {result.returncode}")
+            if result.stderr:
+                st.error(f"Error details: {result.stderr}")
+            if result.stdout:
+                st.text("Output:")
+                st.text(result.stdout)
+
+    def _handle_preview_run(self, num_items: int) -> None:
+        """Run the LLM preview generation subprocess."""
+        try:
+            self._run_llm_script("llm_preview.py", num_items, f"Generating previews for {num_items} items...")
+        except Exception as e:
+            st.error(f"Failed to run preview generation: {str(e)}")
+
     def _handle_parameterization_run(self, num_items: int) -> None:
         """Run the LLM parameterization subprocess."""
         try:
-            import subprocess
-            import sys
-
-            with self.ui_helpers.with_spinner(f"Running parameterization for {num_items} items..."):
-                result = subprocess.run(
-                    [sys.executable, "llm_parameterization.py", str(num_items)],
-                    capture_output=True,
-                    text=True,
-                    cwd=".",
-                )
-            
-            if result.returncode == 0:
-                st.session_state.global_records = DataService.load_global_database()
-                self._invalidate_df_cache()
-                st.rerun()
-            else:
-                st.error(f"Parameterization failed with error code {result.returncode}")
-                if result.stderr:
-                    st.error(f"Error details: {result.stderr}")
-                if result.stdout:
-                    st.text("Output:")
-                    st.text(result.stdout)
+            self._run_llm_script("llm_parameterization.py", num_items, f"Running parameterization for {num_items} items...")
         except Exception as e:
             st.error(f"Failed to run parameterization: {str(e)}")
 
@@ -226,8 +288,9 @@ class DatabaseTab:
             saved_count = 0
             
             with self.ui_helpers.with_spinner("Auto-saving changes…"):
-                # Handle prompt text changes (remove + re-add)
+                # Handle prompt text changes (remove + re-add + regenerate preview)
                 if prompt_changes:
+                    from llm_preview import generate_single_preview
                     db = DatabaseManager()
                     for _index, original_record, new_prompt_text in prompt_changes:
                         if not new_prompt_text or not new_prompt_text.strip():
@@ -239,6 +302,13 @@ class DatabaseTab:
                         for field in ("craziness", "isSexual", "madeFor"):
                             if field in original_record:
                                 new_item[field] = original_record[field]
+                        # Regenerate preview for the edited prompt
+                        try:
+                            new_preview = run_async(generate_single_preview(new_prompt_text))
+                            if new_preview:
+                                new_item["preview"] = new_preview
+                        except Exception:
+                            pass  # preview generation is best-effort
                         old_prompt = str(original_record.get("prompt") or "").strip()
                         if old_prompt:
                             run_async(db.remove_from_global_database_by_prompt([old_prompt]))

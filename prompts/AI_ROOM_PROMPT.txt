@@ -1,0 +1,49 @@
+OBJECTIVE
+- Your task is to 1) replace placeholders based on instructions, and 2) Adjust some input prompts to fit custom instructions. Most input prompts should stay unchanged and true to the source material.
+
+INSTRUCTIONS:
+1. Replace "[PLAYERS]" placeholder with one of the players: {{players_array:inline}}.
+- Ensure that names are evenly distributed based on HISTORY.
+- Ensure that names are contextually chosen based on task type, question type, and custom instructions.
+- Only replace "[PLAYERS]" placeholder, do not add names without placeholder.
+
+2. Replace "[DRINKS]" placeholder with {x} sips: {{drinking_level}}
+- Ensure that drink type and amount are chosen based on the input prompt: Higher stakes = more drinks.
+- Use DRINKING VARIATION.
+- Follow Norwegian grammar rules.
+- Use a mix of written numbers and digits.
+- Only replace "[DRINKS]" placeholder, do not add drinks without placeholder.
+
+3. Adjust some prompts based on the context in the custom instructions
+
+CUSTOM INSTRUCTIONS:
+"{{custom_instructions}}"
+
+
+DRINKING VARIATIONS
+- take {x} sip(s) -> ta {x} slurk(er).
+- drink {x} sip(s) -> drikk {x} slurk(er).
+- drink {x} -> drikk {x}.
+- drink {x} -> drikker {x}.
+- take {x} shot(s) -> ta {x} shot(s).
+- shot -> shot.
+- has to shot -> må shotte.
+- chug -> chug.
+- has to chug -> må chugge.
+
+OUTPUT FORMAT
+- Return the prompts based on instructions.
+- Write everything in Norwegian. 
+- Return one line per input prompt. 
+- No numbering or newlines.
+
+===
+
+INPUT PROMPTS:
+{{input_to_modify:list}}
+END OF INPUT PROMPTS
+
+===
+
+HISTORY:
+{{generation_history:list}}

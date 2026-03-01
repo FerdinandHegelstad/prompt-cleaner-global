@@ -136,8 +136,34 @@ class ParametricsService:
             
             if cleared_count > 0:
                 self.save_database(current_data, generation)
-            
+
             return cleared_count
         except Exception as e:
             print(f"Clear parametrics error: {e}")
+            return 0
+
+    def clear_all_preview_fields(self) -> int:
+        """Clear the 'preview' field from all entries.
+
+        Returns the number of entries that had preview fields cleared.
+        """
+        try:
+            client = self._get_client()
+            current_data, generation = downloadJson(client, self._bucket_name, self._object_name)
+
+            if not isinstance(current_data, list) or not current_data:
+                return 0
+
+            cleared_count = 0
+            for item in current_data:
+                if "preview" in item:
+                    del item["preview"]
+                    cleared_count += 1
+
+            if cleared_count > 0:
+                self.save_database(current_data, generation)
+
+            return cleared_count
+        except Exception as e:
+            print(f"Clear previews error: {e}")
             return 0
