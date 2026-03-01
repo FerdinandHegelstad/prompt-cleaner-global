@@ -9,17 +9,17 @@ INSTRUCTIONS:
 - Only replace "[PLAYERS]" placeholder, do not add names without placeholder.
 
 2. Replace "[DRINKS]" placeholder with x sips: {{drinking_level}}
-- Use DRINKING VARIATION.
-    <<DRINKING VARIATION (Choose one that fits grammatically, or modify to fit)
-    - ta x slurk(er)
-    - tar x slurker
-    - drikke x
-    - drikker x
-    - ta x shot(s)
-    - må shotte
-    - må chugge
-    - shot
-    - chug>>
+- Use a good mix of variation:
+    <<DRINKING VARIATION (Choose one that fits grammatically). You don't have to use "slurker" (e.g. "Alle tar 3")
+    - "ta x slurk(er)" / ", drikk(er) x"
+    - "tar x slurker"
+    - "drikk x"
+    - "må drikke x"
+    - "ta x shot(s)"
+    - "må shotte"
+    - "må chugge"
+    - "shot"
+    - "chug">>
 - Follow Norwegian grammar rules.
 - Use a mix of written numbers and digits.
 - Only replace "[DRINKS]" placeholder, do not add drinks without placeholder (if not mentioned in custom instructions).
