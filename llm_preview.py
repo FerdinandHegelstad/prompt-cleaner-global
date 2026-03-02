@@ -74,6 +74,11 @@ class PreviewLLM:
     def __init__(self):
         self.client: Optional[AsyncOpenAI] = None
         self.system_prompt = self._build_system_prompt()
+        print("\n" + "=" * 60)
+        print("SYSTEM PROMPT BEING USED:")
+        print("=" * 60)
+        print(self.system_prompt)
+        print("=" * 60 + "\n")
 
     @staticmethod
     def _build_system_prompt() -> str:
@@ -132,6 +137,17 @@ class PreviewLLM:
                 if not text:
                     print("  Empty response from LLM")
                     continue
+
+                # Log input/output grouped together
+                print("\n" + "-" * 40)
+                print("INPUT:")
+                for j, p in enumerate(prompts):
+                    print(f"  [{j+1}] {p}")
+                print("OUTPUT:")
+                for j, ln in enumerate(text.splitlines()):
+                    if ln.strip():
+                        print(f"  [{j+1}] {ln.strip()}")
+                print("-" * 40)
 
                 lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 

@@ -13,14 +13,17 @@
 </instructions>
 
 <examples>
-Input: "[DRINKS] hvis du elsker denne gruppa"
-Good outputs: "Drikk 4 hvis du elsker denne gruppa", "Ta 4 slurker hvis du elsker denne gruppa", "4 slurker hvis du elsker denne gruppa"
-
 Input: "[PLAYER] må [DRINKS]"
 Good outputs: "Stine må ta 4", "Stine må drikke tre", "Stine må ta 3 slurker"
 
 Input: "Alle gutter [DRINKS]"
 Good outputs: "Alle gutter drikker 4", "Alle gutter tar tre slurker", "Alle gutter tar 5"
+
+Input: "[DRINKS] til [PLAYER]"
+Good outputs: "Tre slurker til Stine", "5 til Stine", "4 slurker til Stine"
+
+Input: "[DRINKS] på [PLAYER]"
+Good outputs: "Tre slurker på Stine", "4 slurker på Stine"
 </examples>
 
 <custom_instructions>
@@ -28,7 +31,7 @@ Good outputs: "Alle gutter drikker 4", "Alle gutter tar tre slurker", "Alle gutt
 </custom_instructions>
 
 <output_format>
-Return one prompt per line. No numbering, no blank lines. Preserve the original language of each prompt — never translate between English and Norwegian.
+Return one prompt per line. No numbering, no blank lines. Preserve the original language of each prompt — don't translate between English and Norwegian.
 </output_format>
 
 <input_prompts>
