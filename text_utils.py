@@ -81,16 +81,20 @@ def strip_file(input_file: str) -> str:
 def normalize(text: str) -> str:
     """Normalizes the text by keeping only word characters and whitespace.
 
+    Bracketed placeholders [PLAYER] and [DRINKS] are converted to stable
+    sentinel tokens before punctuation is stripped. This ensures prompts
+    composed entirely of placeholders (e.g. "[PLAYER] drinks [DRINKS]")
+    produce a non-empty dedup key, while bare words "player"/"drinks"
+    are still removed by build_dedup_key().
+
     Args:
         text: The text to normalize.
 
     Returns:
         Normalized text.
     """
-    # IMPORTANT: Do NOT pre-process [PLAYER]/[DRINKS] here.
-    # Brackets are stripped by the regex below, turning them into bare words
-    # "PLAYER"/"DRINKS", which build_dedup_key() then removes. This makes
-    # placeholders invisible to dedup -- which is the correct behavior.
+    text = re.sub(r'\[PLAYER\]', 'XSENTINELPLAYERX', text, flags=re.IGNORECASE)
+    text = re.sub(r'\[DRINKS\]', 'XSENTINELDRINKSX', text, flags=re.IGNORECASE)
     return re.sub(r'[^\w\s]', '', text)
 
 
