@@ -9,10 +9,10 @@ REQUIRED
 <craziness: 1 (LEAST), to 4 (MOST)>
 
 CRAZINESS DEFINITIONS
-- 1: Basic content - normal drinking game content.
-- 2: Standard, low-pressure challenges or group questions everyone answers (e.g., “Never Have I Ever” or "Fuck marry kill: 3 to the left"); light personal sharing.
+- 1: Low risk, easy, get to know-content.
+- 2: Standard, simple challenges or group questions everyone answers (e.g., “Never Have I Ever” or "Fuck marry kill: 3 to the left"); light personal sharing.
 - 3: Higher stakes and more sharing
-- 4: Highest, personal sharing or physical/creative tasks; uncomfortable but safe.
+- 4: Highest, personal sharing or physical/creative tasks.
 
 REQUIRED
 <isSexual: true, false>
@@ -23,6 +23,14 @@ SEXUAL DEFINITIONS
 - examples: kissing, sex, flashing, 'ligging', peeing, 'ons' (one night stand).
 - FALSE: all other content.
 - gray area examples which are FALSE: hugging, kissing (in the past, not as a challenge), loving someone/ something.
+
+REQUIRED
+<filler: true, false>
+
+FILLER DEFINITIONS
+- TRUE: a prompt with little actionable content. Covers: a drinking instruction to one or more players, or a plain statement. No task, question, or dare is involved. Drinking itself is not considered an action.
+  Examples: "[PLAYER] [DRINKS]", "Den eldste må dele ut [DRINKS]", "Del ut [DRINKS] hvis du har sorte sokker på", "Alle blonde må [DRINKS]".
+- FALSE: any prompt requiring the player to think, answer, or perform an action (dares, questions, challenges, pointing game, "Never Have I Ever", etc.).
 
 OPTIONAL
 <madeFor: boys, girls>
@@ -51,6 +59,7 @@ Output: {
   "prompt": "Hvem er den diggeste dama du har kyssa",
   "craziness": 2,
   "isSexual": false,
+  "filler": false,
   "madeFor": "boys"
 }
 
@@ -59,6 +68,7 @@ Output: {
   "prompt": "Alle jenter drikker",
   "craziness": 1,
   "isSexual": false,
+  "filler": true,
   "madeFor": "girls"
 }
 
@@ -66,7 +76,8 @@ Input: Hvem i rommet ville du hatt sex med?
 Output: {
   "prompt": "Hvem i rommet ville du hatt sex med?",
   "craziness": 3,
-  "isSexual": true
+  "isSexual": true,
+  "filler": false
 }
 
 BEGIN. Return the JSON object only. Make sure that all the required fields are mentioned, and that the output ends with '}'

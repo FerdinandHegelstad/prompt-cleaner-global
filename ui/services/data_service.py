@@ -84,12 +84,14 @@ class DataService:
             return 0, "Error"
 
     @staticmethod
-    def load_all_data() -> Dict[str, List[Dict[str, Any]]]:
+    def load_all_data() -> Dict[str, Any]:
         """Load all data sources at once."""
+        raw_count, _ = DataService.get_raw_file_count()
         return {
             "global_records": DataService.load_global_database(),
             "discards_records": DataService.load_discards(),
             "user_selection_records": DataService.load_user_selection(),
+            "raw_count": raw_count,
         }
 
 

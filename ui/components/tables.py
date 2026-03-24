@@ -20,12 +20,13 @@ class TableComponents:
                 "occurrences": r.get("occurrences", 1),
                 "craziness": r.get("craziness", None),
                 "isSexual": r.get("isSexual", None),
+                "filler": r.get("filler", None),
                 "madeFor": str(r.get("madeFor") or "").strip(),
             })
         df = pd.DataFrame(rows)
         if df.empty:
             return df
-        return df[["selected", "prompt", "preview", "occurrences", "craziness", "isSexual", "madeFor"]]
+        return df[["selected", "prompt", "preview", "occurrences", "craziness", "isSexual", "filler", "madeFor"]]
     
     @staticmethod
     def create_readonly_dataframe(records: List[Dict[str, Any]]) -> pd.DataFrame:
@@ -88,6 +89,11 @@ class TableComponents:
                 "isSexual": st.column_config.CheckboxColumn(
                     "Sexual",
                     help="Whether the prompt has sexual content",
+                    disabled=False,
+                ),
+                "filler": st.column_config.CheckboxColumn(
+                    "Filler",
+                    help="Whether the prompt is a filler (drinking instruction or plain statement with no task)",
                     disabled=False,
                 ),
                 "madeFor": st.column_config.TextColumn(

@@ -70,7 +70,7 @@ bucket_name = "unfiltered_database"
 All data is stored in Google Cloud Storage as JSON/text files:
 
 - `DATABASE.json`: Unified store for all prompts with parametric data
-  - Format: `{prompt, occurrences, craziness?, isSexual?, madeFor?}`
+  - Format: `{prompt, occurrences, craziness?, isSexual?, filler?, madeFor?}`
   - `prompt` is the unique identifier (cleaned text)
   - Parametric fields are added by LLM parameterization
 - `USER_SELECTION.json`: Queue of items awaiting human review

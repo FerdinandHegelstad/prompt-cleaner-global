@@ -28,19 +28,25 @@ class DatabaseTab:
     
     def render(self) -> None:
         """Render the complete database tab."""
+        # Show confirmation dialogs if triggered
+        if st.session_state.get("show_clear_parametrics_dialog"):
+            self._clear_parametrics_dialog()
+        if st.session_state.get("show_clear_previews_dialog"):
+            self._clear_previews_dialog()
+
         # Render top-level metrics
         self.metrics.render_four_column_metrics()
-        
+
         # Render load button and handle action
         if self.metrics.render_load_button():
             self.metrics.handle_load_action()
-        
+
         # Action buttons row: Clear All Parametrics + Run Parameterization
         self._render_action_buttons()
-        
+
         # Render database section (unified table with parametric columns)
         self._render_database_section()
-        
+
         # Render discards section
         self._render_discards_section()
     
@@ -60,7 +66,6 @@ class DatabaseTab:
             num_items = st.number_input(
                 "Items to parameterize",
                 min_value=1,
-                max_value=2000,
                 value=5,
                 step=1,
                 label_visibility="collapsed",
@@ -95,61 +100,83 @@ class DatabaseTab:
 
     def _handle_clear_all_action(self) -> None:
         """Clear craziness/isSexual/madeFor from all entries (keeps entries)."""
+        st.session_state.show_clear_parametrics_dialog = True
+
+    @st.dialog("Clear All Parametrics")
+    def _clear_parametrics_dialog(self) -> None:
+        """Confirmation dialog for clearing all parametric fields."""
         try:
             parametrics_service = ParametricsService()
             all_entries = parametrics_service.load_all_database_entries()
             parameterized_count = sum(1 for e in all_entries if "craziness" in e)
-            
+
             if parameterized_count == 0:
-                self.ui_helpers.show_info_message("No entries have parametric fields to clear.")
+                st.info("No entries have parametric fields to clear.")
+                if st.button("Close"):
+                    st.rerun()
                 return
-            
-            if st.session_state.get("parametrics_clear_all_confirmed", False):
-                with self.ui_helpers.with_spinner("Clearing all parametric fields…"):
-                    cleared = parametrics_service.clear_all_parametric_fields()
-                    st.session_state.global_records = DataService.load_global_database()
-                    st.session_state.parametrics_clear_all_confirmed = False
-                    self._invalidate_df_cache()
-                    self.ui_helpers.show_success_message(
-                        f"Cleared parametric fields from {cleared} entries (entries themselves kept)."
-                    )
-            else:
-                st.session_state.parametrics_clear_all_confirmed = True
-                self.ui_helpers.show_warning_message(
-                    f"About to clear parametric fields from {parameterized_count} entries. Click again to confirm."
-                )
+
+            st.warning(
+                f"This will remove craziness, isSexual, filler, and madeFor from **{parameterized_count}** entries. "
+                "This action cannot be undone."
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_clear_parametrics_dialog = False
+                    st.rerun()
+            with col2:
+                if st.button("Confirm Clear", type="primary", use_container_width=True):
+                    with st.spinner("Clearing all parametric fields…"):
+                        cleared = parametrics_service.clear_all_parametric_fields()
+                        st.session_state.global_records = DataService.load_global_database()
+                        self._invalidate_df_cache()
+                    st.session_state.show_clear_parametrics_dialog = False
+                    st.toast(f"Cleared parametric fields from {cleared} entries.")
+                    st.rerun()
         except Exception as e:
-            st.session_state.parametrics_clear_all_confirmed = False
-            self.ui_helpers.show_error_message(f"Failed to clear parametrics: {str(e)}")
+            st.error(f"Failed to clear parametrics: {str(e)}")
 
     def _handle_clear_all_previews(self) -> None:
         """Clear the 'preview' field from all database entries."""
+        st.session_state.show_clear_previews_dialog = True
+
+    @st.dialog("Clear All Previews")
+    def _clear_previews_dialog(self) -> None:
+        """Confirmation dialog for clearing all preview fields."""
         try:
             parametrics_service = ParametricsService()
             all_entries = parametrics_service.load_all_database_entries()
             preview_count = sum(1 for e in all_entries if "preview" in e)
 
             if preview_count == 0:
-                self.ui_helpers.show_info_message("No entries have previews to clear.")
+                st.info("No entries have previews to clear.")
+                if st.button("Close"):
+                    st.rerun()
                 return
 
-            if st.session_state.get("preview_clear_all_confirmed", False):
-                with self.ui_helpers.with_spinner("Clearing all preview fields…"):
-                    cleared = parametrics_service.clear_all_preview_fields()
-                    st.session_state.global_records = DataService.load_global_database()
-                    st.session_state.preview_clear_all_confirmed = False
-                    self._invalidate_df_cache()
-                    self.ui_helpers.show_success_message(
-                        f"Cleared previews from {cleared} entries."
-                    )
-            else:
-                st.session_state.preview_clear_all_confirmed = True
-                self.ui_helpers.show_warning_message(
-                    f"About to clear previews from {preview_count} entries. Click again to confirm."
-                )
+            st.warning(
+                f"This will remove the preview field from **{preview_count}** entries. "
+                "This action cannot be undone."
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Cancel", use_container_width=True):
+                    st.session_state.show_clear_previews_dialog = False
+                    st.rerun()
+            with col2:
+                if st.button("Confirm Clear", type="primary", use_container_width=True):
+                    with st.spinner("Clearing all preview fields…"):
+                        cleared = parametrics_service.clear_all_preview_fields()
+                        st.session_state.global_records = DataService.load_global_database()
+                        self._invalidate_df_cache()
+                    st.session_state.show_clear_previews_dialog = False
+                    st.toast(f"Cleared previews from {cleared} entries.")
+                    st.rerun()
         except Exception as e:
-            st.session_state.preview_clear_all_confirmed = False
-            self.ui_helpers.show_error_message(f"Failed to clear previews: {str(e)}")
+            st.error(f"Failed to clear previews: {str(e)}")
 
     def _run_llm_script(self, script: str, num_items: int, spinner_label: str) -> None:
         """Run an LLM subprocess script and reload the database on success."""
@@ -241,7 +268,7 @@ class DatabaseTab:
             return
         
         prompt_changes: List[tuple] = []      # (index, original_record, new_prompt)
-        parametric_changes: List[tuple] = []   # (index, original_record, prompt, craziness, isSexual, madeFor)
+        parametric_changes: List[tuple] = []   # (index, original_record, prompt, craziness, isSexual, filler, madeFor)
         
         for i in range(len(edited_df)):
             if i >= len(records):
@@ -258,24 +285,30 @@ class DatabaseTab:
             # Check parametric field changes (NaN-safe comparisons)
             orig_craziness = original_df.iloc[i]["craziness"]
             orig_sexual = original_df.iloc[i]["isSexual"]
+            orig_filler = original_df.iloc[i]["filler"]
             orig_madefor = str(original_df.iloc[i]["madeFor"]).strip()
-            
+
             edit_craziness = edited_df.iloc[i]["craziness"]
             edit_sexual = edited_df.iloc[i]["isSexual"]
+            edit_filler = edited_df.iloc[i]["filler"]
             edit_madefor = str(edited_df.iloc[i]["madeFor"]).strip()
-            
+
             orig_c_nan = pd.isna(orig_craziness)
             edit_c_nan = pd.isna(edit_craziness)
             craziness_changed = (orig_c_nan != edit_c_nan) or (not orig_c_nan and not edit_c_nan and orig_craziness != edit_craziness)
-            
+
             orig_s_nan = pd.isna(orig_sexual)
             edit_s_nan = pd.isna(edit_sexual)
             sexual_changed = (orig_s_nan != edit_s_nan) or (not orig_s_nan and not edit_s_nan and bool(orig_sexual) != bool(edit_sexual))
-            
+
+            orig_f_nan = pd.isna(orig_filler)
+            edit_f_nan = pd.isna(edit_filler)
+            filler_changed = (orig_f_nan != edit_f_nan) or (not orig_f_nan and not edit_f_nan and bool(orig_filler) != bool(edit_filler))
+
             madefor_changed = orig_madefor != edit_madefor
-            
-            if craziness_changed or sexual_changed or madefor_changed:
-                parametric_changes.append((i, records[i], orig_prompt, edit_craziness, edit_sexual, edit_madefor))
+
+            if craziness_changed or sexual_changed or filler_changed or madefor_changed:
+                parametric_changes.append((i, records[i], orig_prompt, edit_craziness, edit_sexual, edit_filler, edit_madefor))
         
         if not prompt_changes and not parametric_changes:
             return
@@ -299,7 +332,7 @@ class DatabaseTab:
                             "prompt": new_prompt_text,
                             "occurrences": original_record.get("occurrences", 1),
                         }
-                        for field in ("craziness", "isSexual", "madeFor"):
+                        for field in ("craziness", "isSexual", "filler", "madeFor"):
                             if field in original_record:
                                 new_item[field] = original_record[field]
                         # Regenerate preview for the edited prompt
@@ -326,13 +359,15 @@ class DatabaseTab:
                     if not isinstance(current_data, list):
                         current_data = []
                     
-                    for _index, _original_record, prompt, new_craziness, new_sexual, new_madefor in parametric_changes:
+                    for _index, _original_record, prompt, new_craziness, new_sexual, new_filler, new_madefor in parametric_changes:
                         for item in current_data:
                             if str(item.get("prompt", "")).strip() == prompt:
                                 if not pd.isna(new_craziness):
                                     item["craziness"] = int(new_craziness)
                                 if not pd.isna(new_sexual):
                                     item["isSexual"] = bool(new_sexual)
+                                if not pd.isna(new_filler):
+                                    item["filler"] = bool(new_filler)
                                 if new_madefor:
                                     item["madeFor"] = str(new_madefor).strip()
                                 saved_count += 1

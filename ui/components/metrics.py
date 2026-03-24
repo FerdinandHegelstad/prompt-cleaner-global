@@ -13,21 +13,18 @@ class MetricsDisplay:
     @staticmethod
     def render_four_column_metrics() -> None:
         """Render the top-level metrics display."""
-        # Get raw file count
-        raw_count, raw_status = DataService.get_raw_file_count()
-        
         # Get cached counts from session
         counts = SessionService.get_data_counts()
-        
+
         # Calculate parameterized count from global records
         global_records = st.session_state.get("global_records", [])
         parameterized_count = sum(1 for r in global_records if "craziness" in r) if global_records else 0
-        
+
         # Create five columns
         col1, col2, col3, col4, col5 = st.columns(5)
-        
+
         with col1:
-            st.metric("Unprocessed Lines", raw_status)
+            st.metric("Unprocessed Lines", f"{counts['raw_count']:,}")
         with col2:
             st.metric("Items in Database", f"{counts['db_count']:,}")
         with col3:
@@ -47,8 +44,8 @@ class MetricsDisplay:
         total_count = len(records)
         param_count = len(parameterized)
         
-        col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
-        
+        col1, col2, col3, col4, col5 = st.columns([2, 1, 1, 1, 1])
+
         with col1:
             if param_count > 0:
                 c1 = len([r for r in parameterized if r.get("craziness") == 1])
@@ -63,17 +60,21 @@ class MetricsDisplay:
             else:
                 distribution = "0% / 0% / 0% / 0%"
             st.metric("Craziness 1/2/3/4", distribution)
-        
+
         with col2:
             boys = len([r for r in parameterized if r.get("madeFor") == "boys"])
             girls = len([r for r in parameterized if r.get("madeFor") == "girls"])
             st.metric("For Boys/Girls", f"{boys}/{girls}")
-        
+
         with col3:
             sexual = len([r for r in parameterized if r.get("isSexual", False)])
             st.metric("Sexual Content", f"{sexual} / {param_count}")
-        
+
         with col4:
+            filler_count = len([r for r in parameterized if r.get("filler", False)])
+            st.metric("Fillers", f"{filler_count} / {param_count}")
+
+        with col5:
             st.metric("Parameterized", f"{param_count} / {total_count}")
     
     @staticmethod

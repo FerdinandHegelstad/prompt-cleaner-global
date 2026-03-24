@@ -50,7 +50,7 @@ The system operates on five distinct files stored in Google Cloud Storage:
 |---|---|---|
 | `raw_stripped.txt` | Plain text (one line per entry) | Pool of unprocessed raw prompts awaiting ingestion |
 | `USER_SELECTION.json` | JSON array of `{prompt}` | Queue of LLM-cleaned items awaiting human review |
-| `DATABASE.json` | JSON array of `{prompt, occurrences, craziness?, isSexual?, madeFor?}` | The canonical, approved prompt database |
+| `DATABASE.json` | JSON array of `{prompt, occurrences, craziness?, isSexual?, filler?, madeFor?}` | The canonical, approved prompt database |
 | `DISCARDS.json` | JSON array of `{prompt, occurrences}` | Rejected prompts (kept for dedup reference) |
 | `REMOVE_LINES.txt` | Plain text (one word/phrase per line) | Blocklist of filter terms applied during ingestion |
 
@@ -73,6 +73,7 @@ Once persisted in `DATABASE.json`, each entry conforms to:
   "occurrences": 1,            // Required — how many times this prompt was encountered
   "craziness": 2,              // Optional — intensity rating 1-4 (set by parameterization)
   "isSexual": false,           // Optional — sexual content flag (set by parameterization)
+  "filler": true,              // Optional — filler flag (set by parameterization)
   "madeFor": "boys"            // Optional — gender-specific targeting (set by parameterization)
 }
 ```
@@ -576,12 +577,12 @@ def _filter_unparameterized(self, database_entries):
     available = []
     for entry in database_entries:
         prompt = entry.get("prompt", "").strip()
-        if prompt and "craziness" not in entry:
+        if prompt and ("craziness" not in entry or "filler" not in entry):
             available.append(entry)
     return available
 ```
 
-**Logic:** An entry is considered "unparameterized" if and only if it lacks the `craziness` field. This is the single field used as the parameterization-status sentinel.
+**Logic:** An entry is considered "unparameterized" if it lacks the `craziness` field OR the `filler` field. This means entries parameterized before `filler` was introduced will be re-queued for parameterization.
 
 ### Step 8.3 — Random Selection
 
@@ -607,6 +608,7 @@ Each selected prompt is sent to the xAI Grok LLM with the classification system 
 | `prompt` | string | Exact copy of input | Yes |
 | `craziness` | integer | 1 (basic) to 4 (highest intensity) | Yes |
 | `isSexual` | boolean | true/false | Yes |
+| `filler` | boolean | true/false | Yes |
 | `madeFor` | string | `"boys"` or `"girls"` | No |
 
 **Craziness scale definitions:**
@@ -650,9 +652,9 @@ The LLM response is validated against a strict schema:
 
 If the LLM response is truncated (starts with `{` but doesn't end with `}`), the system attempts recovery:
 
-1. **Extract craziness from partial:** If only `craziness` was parsed, construct a minimal valid response with `isSexual: false`
+1. **Extract craziness from partial:** If only `craziness` was parsed, construct a minimal valid response with `isSexual: false` and `filler: false`
 2. **Close truncated JSON:** If the brace count is unbalanced, try appending `}`
-3. **Add missing required fields:** If `isSexual` is missing but other fields are present, append `"isSexual": false` and close
+3. **Add missing required fields:** If `isSexual` or `filler` is missing but other fields are present, append them with `false` defaults and close
 
 ### Step 8.7 — Incremental Database Update
 
@@ -670,7 +672,7 @@ The update process:
 
 1. Download `DATABASE.json` with current generation
 2. Build a lookup map from pending updates keyed by prompt text
-3. For each database entry whose prompt matches an update, merge the parametric fields (`craziness`, `isSexual`, `madeFor`)
+3. For each database entry whose prompt matches an update, merge the parametric fields (`craziness`, `isSexual`, `filler`, `madeFor`)
 4. Upload with optimistic concurrency precondition
 5. Retry with exponential backoff on conflict
 
@@ -901,7 +903,7 @@ def run_async(coro):
 │               → Random sample of N entries                                      │
 │               → For each entry:                                                 │
 │                   LLM classifies → {craziness: 1-4, isSexual: bool,            │
-│                                     madeFor?: "boys"|"girls"}                   │
+│                                     filler: bool, madeFor?: "boys"|"girls"}     │
 │                   Validate JSON schema                                          │
 │                   (Attempt partial recovery on truncated responses)              │
 │               → Merge parametric fields back into DATABASE.json                 │

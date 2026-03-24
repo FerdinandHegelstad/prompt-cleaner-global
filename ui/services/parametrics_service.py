@@ -15,7 +15,7 @@ from config import (
 
 
 class ParametricsService:
-    """Service for parametric field operations (craziness, isSexual, madeFor) on DATABASE.json."""
+    """Service for parametric field operations (craziness, isSexual, filler, madeFor) on DATABASE.json."""
     
     def __init__(self):
         """Initialize the parametrics service."""
@@ -74,6 +74,7 @@ class ParametricsService:
                 "boys_count": len([r for r in parameterized if r.get("madeFor") == "boys"]),
                 "girls_count": len([r for r in parameterized if r.get("madeFor") == "girls"]),
                 "sexual_count": len([r for r in parameterized if r.get("isSexual", False)]),
+                "filler_count": len([r for r in parameterized if r.get("filler", False)]),
                 "avg_craziness": sum(r.get("craziness", 0) for r in parameterized) / len(parameterized) if parameterized else 0,
                 "craziness_distribution": {}
             }
@@ -90,21 +91,24 @@ class ParametricsService:
     
     def _validate_parametric_item(self, item: Dict[str, Any]) -> bool:
         """Validate that a parametric item has the correct structure."""
-        required_fields = ["prompt", "craziness", "isSexual"]
-        
+        required_fields = ["prompt", "craziness", "isSexual", "filler"]
+
         for field in required_fields:
             if field not in item:
                 return False
-        
+
         if not isinstance(item["prompt"], str) or not item["prompt"].strip():
             return False
-        
+
         if not isinstance(item["craziness"], int) or not (1 <= item["craziness"] <= 10):
             return False
-        
+
         if not isinstance(item["isSexual"], bool):
             return False
-        
+
+        if not isinstance(item["filler"], bool):
+            return False
+
         if "madeFor" in item:
             if not isinstance(item["madeFor"], str) or item["madeFor"] not in ["boys", "girls", "both"]:
                 return False
@@ -112,7 +116,7 @@ class ParametricsService:
         return True
     
     def clear_all_parametric_fields(self) -> int:
-        """Clear parametric fields (craziness, isSexual, madeFor) from all entries.
+        """Clear parametric fields (craziness, isSexual, filler, madeFor) from all entries.
         
         Does NOT delete entries -- only removes the parametric classification data.
         Returns the number of entries that had parametric fields cleared.
@@ -127,7 +131,7 @@ class ParametricsService:
             cleared_count = 0
             for item in current_data:
                 had_parametrics = False
-                for field in ("craziness", "isSexual", "madeFor"):
+                for field in ("craziness", "isSexual", "filler", "madeFor"):
                     if field in item:
                         del item[field]
                         had_parametrics = True

@@ -263,7 +263,7 @@ class DiscardedItemsStore:
 class GlobalDatabaseStore:
     """Global database backed by Google Cloud Storage with optimistic concurrency.
 
-    New unified format: {prompt, occurrences, craziness?, isSexual?, madeFor?}.
+    New unified format: {prompt, occurrences, craziness?, isSexual?, filler?, madeFor?}.
     """
 
     _CACHE_TTL_SECONDS = 5.0
@@ -472,7 +472,7 @@ class GlobalDatabaseStore:
                 backoffSeconds = min(backoffSeconds * 2, 2.0)
 
     async def update_item_parametrics(self, prompt: str, parametrics: Dict[str, Any], maxRetries: int = 5) -> bool:
-        """Update parametric fields (craziness, isSexual, madeFor) for an entry matched by prompt.
+        """Update parametric fields (craziness, isSexual, filler, madeFor) for an entry matched by prompt.
 
         Returns True if the item was found and updated, False otherwise.
         """
@@ -495,7 +495,7 @@ class GlobalDatabaseStore:
                     existingPrompt = str(item.get('prompt') or '')
                     if _prompt_dedup_key(existingPrompt) == candidateKey:
                         # Merge parametric fields
-                        for key in ('craziness', 'isSexual', 'madeFor'):
+                        for key in ('craziness', 'isSexual', 'filler', 'madeFor'):
                             if key in parametrics:
                                 item[key] = parametrics[key]
                         found = True

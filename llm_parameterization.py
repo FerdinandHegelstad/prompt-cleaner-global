@@ -159,7 +159,7 @@ class ParameterizationLLM:
             if not isinstance(data, dict):
                 return False
             
-            required_fields = ["prompt", "craziness", "isSexual"]
+            required_fields = ["prompt", "craziness", "isSexual", "filler"]
             for field in required_fields:
                 if field not in data:
                     return False
@@ -172,12 +172,15 @@ class ParameterizationLLM:
             
             if not isinstance(data["isSexual"], bool):
                 return False
-            
+
+            if not isinstance(data["filler"], bool):
+                return False
+
             if "madeFor" in data:
                 if not isinstance(data["madeFor"], str) or data["madeFor"] not in ["boys", "girls"]:
                     return False
             
-            allowed_fields = {"prompt", "craziness", "isSexual", "madeFor"}
+            allowed_fields = {"prompt", "craziness", "isSexual", "filler", "madeFor"}
             if set(data.keys()) - allowed_fields:
                 return False
             
@@ -201,20 +204,24 @@ class ParameterizationLLM:
                             recovered = {
                                 "prompt": original_prompt,
                                 "craziness": craziness,
-                                "isSexual": False
+                                "isSexual": False,
+                                "filler": False
                             }
                             return recovered
                 
                 if response_text.count('{') > response_text.count('}'):
                     try_complete = response_text + '}'
                     try:
-                        return json.loads(try_complete)
+                        recovered = json.loads(try_complete)
+                        recovered.setdefault("isSexual", False)
+                        recovered.setdefault("filler", False)
+                        return recovered
                     except Exception:
                         pass
                 
                 if '"prompt":' in response_text and '"craziness":' in response_text:
-                    if not response_text.endswith(',') and '"isSexual"' not in response_text:
-                        try_complete = response_text.rstrip(',') + ', "isSexual": false}'
+                    if not response_text.endswith(',') and '"isSexual"' not in response_text and '"filler"' not in response_text:
+                        try_complete = response_text.rstrip(',') + ', "isSexual": false, "filler": false}'
                         try:
                             return json.loads(try_complete)
                         except Exception:
@@ -263,7 +270,7 @@ class ParameterizationWorkflow:
         
         print(f"📊 Found {len(database_entries)} database entries")
         
-        # Filter entries that need parameterization (no craziness field)
+        # Filter entries that need parameterization (missing craziness or filler)
         available_items = self._filter_unparameterized(database_entries)
         already_parameterized = len(database_entries) - len(available_items)
         print(f"📊 Already parameterized: {already_parameterized}")
@@ -300,13 +307,13 @@ class ParameterizationWorkflow:
     
     def _filter_unparameterized(self, database_entries: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Filter database entries that haven't been parameterized yet.
-        
-        An entry is considered unparameterized if it lacks the 'craziness' field.
+
+        An entry is considered unparameterized if it lacks the 'craziness' or 'filler' field.
         """
         available = []
         for entry in database_entries:
             prompt = entry.get("prompt", "").strip()
-            if prompt and "craziness" not in entry:
+            if prompt and ("craziness" not in entry or "filler" not in entry):
                 available.append(entry)
         return available
     
@@ -339,6 +346,7 @@ class ParameterizationWorkflow:
                     "prompt": prompt,
                     "craziness": result["craziness"],
                     "isSexual": result["isSexual"],
+                    "filler": result["filler"],
                     "madeFor": result.get("madeFor"),
                 })
                 stats["added"] += 1
@@ -387,6 +395,7 @@ class ParameterizationWorkflow:
                             upd = update_map[entry_key]
                             entry["craziness"] = upd["craziness"]
                             entry["isSexual"] = upd["isSexual"]
+                            entry["filler"] = upd["filler"]
                             if upd.get("madeFor"):
                                 entry["madeFor"] = upd["madeFor"]
                             updated_count += 1

@@ -14,6 +14,7 @@ class SessionService:
             "db_count": len(st.session_state.get("global_records", [])),
             "discards_count": len(st.session_state.get("discards_records", [])),
             "selection_count": len(st.session_state.get("user_selection_records", [])),
+            "raw_count": st.session_state.get("raw_count", 0),
         }
     
     @staticmethod
