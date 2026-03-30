@@ -158,17 +158,23 @@ class BatchReviewComponents:
     
     @staticmethod
     def render_batch_item(item: Dict[str, Any], index: int, batch_id: int) -> bool:
-        """Render a single batch item and return True if discarded."""
+        """Render a single batch item with inline editing and return True if discarded."""
         col1, col2 = st.columns([1, 6])
-        
+
         with col1:
             checkbox_key = f"discard_check_{batch_id}_{index}"
             discarded = st.checkbox("Discard", key=checkbox_key)
-        
+
         with col2:
-            prompt_text = str(item.get("prompt") or "").strip()
-            st.text(prompt_text or "(empty)")
-        
+            edit_key = f"edit_prompt_{batch_id}_{index}"
+            if edit_key not in st.session_state:
+                st.session_state[edit_key] = str(item.get("prompt") or "").strip()
+            st.text_input(
+                "Prompt",
+                key=edit_key,
+                label_visibility="collapsed",
+            )
+
         st.markdown("---")
         return discarded
     

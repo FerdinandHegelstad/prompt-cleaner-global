@@ -77,7 +77,16 @@ class SelectionTab:
         """Handle the fetch next button action."""
         items = self.batch_session.get_batch_items()
         discard_actions = self.batch_session.get_discard_actions()
-        
+        batch_id = self.batch_session.get_batch_id()
+
+        # Apply any inline edits the user made
+        for i, item in enumerate(items):
+            edit_key = f"edit_prompt_{batch_id}_{i}"
+            if edit_key in st.session_state:
+                edited = st.session_state[edit_key].strip()
+                if edited:
+                    item["prompt"] = edited
+
         # Process current batch
         if items:
             kept_count, discarded_count = self.selection_service.process_batch_items(
